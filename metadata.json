@@ -1,0 +1,5 @@
+{
+  "name": "ACCS STUDIOS AI (ASAI)",
+  "description": "An AI-powered application builder that uses prompts to generate fully functional web applications. Features a live preview sandbox, file management, and interactive chat for continuous development.",
+  "requestFramePermissions": []
+}

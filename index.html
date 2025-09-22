@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ASAI - AI Application Builder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: 'var(--color-primary)',
+              secondary: 'var(--color-secondary)',
+              accent: 'var(--color-accent)',
+              neutral: 'var(--color-neutral)',
+              'base-content': 'var(--color-base-content)',
+              'base-100': 'var(--color-base-100)',
+              'base-200': 'var(--color-base-200)',
+              'base-300': 'var(--color-base-300)',
+            }
+          }
+        }
+      }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style id="brand-styles">
+      :root {
+        --color-primary: #4f46e5;      /* indigo-600 */
+        --color-secondary: #c026d3;   /* fuchsia-600 */
+        --color-accent: #22d3ee;      /* cyan-400 */
+        --color-neutral: #9ca3af;     /* gray-400 */
+        --color-base-content: #f9fafb;/* gray-50 */
+        --color-base-100: #111827;    /* gray-900 */
+        --color-base-200: #1f2937;    /* gray-800 */
+        --color-base-300: #374151;    /* gray-700 */
+        
+        --image-background: none;
+      }
+    </style>
+    <style>
+      body { 
+        font-family: 'Inter', sans-serif;
+        background-color: var(--color-base-100);
+        color: var(--color-base-content);
+        background-image: none; /* Dark mode doesn't need the dot pattern */
+      }
+      
+      #app-background {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background-image: var(--image-background);
+        background-size: cover;
+        background-position: center;
+        opacity: 0.2;
+        z-index: -1;
+        transition: background-image 0.5s ease-in-out;
+      }
+
+      @keyframes fade-in-up {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      @keyframes typing {
+        from { width: 0 }
+        to { width: 100% }
+      }
+      @keyframes blink-caret {
+        from, to { border-color: transparent }
+        50% { border-color: var(--color-accent); }
+      }
+      
+      .typing-text {
+        overflow: hidden;
+        white-space: nowrap;
+        border-right: .15em solid var(--color-accent);
+        animation: typing 2s steps(22, end), blink-caret .75s step-end infinite;
+      }
+
+      .glassmorphism { /* Kept for landing page compatibility */
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .scroll-animate {
+        opacity: 0;
+        transform: translateY(30px);
+        transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+      }
+
+      .scroll-animate.in-view {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      
+      .btn-shine {
+        position: relative;
+        overflow: hidden;
+      }
+      .btn-shine::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+        transition: all 0.6s;
+      }
+      .btn-shine:hover::before {
+        left: 100%;
+      }
+      
+    </style>
+
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "react": "https://aistudiocdn.com/react@^19.1.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.20.0",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.3.0/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="app-background"></div>
+    <div id="root"></div>
+    <script type="text/babel" data-type="module" src="/index.tsx"></script>
+  </body>
+</html>
