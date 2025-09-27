@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RobotIcon } from './icons';
+import { RobotIcon, BrainIcon } from './icons';
 import Spinner from './ui/Spinner';
 import { AgentState } from '../types';
 
@@ -53,9 +53,14 @@ const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ isOpen, onClo
                         placeholder="e.g., Implement a complete dark mode toggle and save the user's preference in localStorage..."
                     />
                 </div>
+                {agentState.status === 'error' && (
+                    <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-400 text-sm">
+                        <strong>Error:</strong> {agentState.lastError}
+                    </div>
+                )}
                 <div className="flex justify-end space-x-4">
                     <button type="button" onClick={onClose} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
-                        Cancel
+                        {agentState.status === 'finished' ? 'Close' : 'Cancel'}
                     </button>
                     <button type="submit" disabled={!objective.trim()} className="px-6 py-2 bg-secondary hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 w-48">
                         Start AI Developer
@@ -78,8 +83,8 @@ const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ isOpen, onClo
                                  {isRunning && <Spinner size="sm" />}
                              </div>
                               {agentState.thoughts && (
-                                <div className="mt-3 pt-2 border-t border-base-300/50">
-                                    <p className="text-xs font-semibold text-neutral">AI THOUGHTS:</p>
+                                <div className="mt-3 pt-3 border-t border-base-300/50">
+                                    <p className="text-xs font-semibold text-neutral flex items-center gap-1"><BrainIcon className="w-4 h-4" /> AI THOUGHTS:</p>
                                     <p className="text-xs text-neutral/90 italic mt-1">"{agentState.thoughts}"</p>
                                 </div>
                             )}
@@ -88,7 +93,7 @@ const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ isOpen, onClo
                                      <h4 className="font-semibold text-base-content mb-2">Plan:</h4>
                                      <ul className="space-y-1.5 text-sm">
                                          {agentState.plan.map((task, index) => (
-                                             <li key={index} className={`flex items-start gap-2 ${index === agentState.currentTaskIndex ? 'text-primary font-bold' : 'text-neutral'}`}>
+                                             <li key={index} className={`flex items-start gap-2 ${index < agentState.currentTaskIndex ? 'text-neutral/60 line-through' : (index === agentState.currentTaskIndex ? 'text-primary font-bold' : 'text-neutral')}`}>
                                                  <span className='mt-1 text-xs shrink-0'>{index < agentState.currentTaskIndex ? '✅' : (index === agentState.currentTaskIndex ? '▶️' : '⏳')}</span>
                                                  <span>{task}</span>
                                              </li>

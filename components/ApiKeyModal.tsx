@@ -15,7 +15,8 @@ const providerDetails = {
 }
 
 const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave, currentConfig }) => {
-  const [keys, setKeys] = useState<ApiConfig>({ gemini: null, openrouter: null, groq: null });
+  // FIX: Added 'e2b: null' to satisfy the ApiConfig type.
+  const [keys, setKeys] = useState<ApiConfig>({ gemini: null, openrouter: null, groq: null, e2b: null });
 
   useEffect(() => {
     if (isOpen) {
@@ -26,16 +27,18 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave, curr
   if (!isOpen) return null;
 
   const handleSave = () => {
+    // FIX: Added 'e2b' to the saved config object to satisfy the ApiConfig type.
     const trimmedKeys: ApiConfig = {
         gemini: keys.gemini?.trim() || null,
         openrouter: keys.openrouter?.trim() || null,
         groq: keys.groq?.trim() || null,
+        e2b: keys.e2b?.trim() || null,
     };
     onSave(trimmedKeys);
     onClose();
   };
   
-  const handleKeyChange = (provider: AiProvider, value: string) => {
+  const handleKeyChange = (provider: keyof ApiConfig, value: string) => {
     setKeys(prev => ({ ...prev, [provider]: value }));
   };
 
@@ -46,7 +49,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave, curr
         <p className="text-sm text-neutral mb-6">Your keys are stored securely in your account and are never shared.</p>
         
         <div className="space-y-6">
-             {(Object.keys(providerDetails) as AiProvider[]).map((providerKey) => (
+             {(Object.keys(providerDetails) as (keyof typeof providerDetails)[]).map((providerKey) => (
                 <div key={providerKey}>
                     <label htmlFor={providerKey} className="block text-sm font-medium text-neutral mb-2">
                         {providerDetails[providerKey].name} API Key

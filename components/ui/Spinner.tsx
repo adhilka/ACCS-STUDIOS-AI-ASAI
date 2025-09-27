@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 const Spinner: React.FC<{ size?: 'sm' | 'md' | 'lg' }> = ({ size = 'md' }) => {
@@ -8,32 +7,29 @@ const Spinner: React.FC<{ size?: 'sm' | 'md' | 'lg' }> = ({ size = 'md' }) => {
     lg: 'w-12 h-12',
   };
 
-  const dotClasses = "absolute w-full h-full rounded-full";
-
   return (
-    <div className={`relative ${sizeClasses[size]}`}>
-      <div className={`${dotClasses} bg-primary opacity-75 animate-pulse-1`}></div>
-      <div className={`${dotClasses} bg-secondary opacity-75 animate-pulse-2`}></div>
-      <div className={`${dotClasses} bg-accent opacity-75 animate-pulse-3`}></div>
-      <style>{`
-        @keyframes pulse-1 {
-          0%, 100% { transform: scale(0.2); }
-          50% { transform: scale(1.0); }
-        }
-        @keyframes pulse-2 {
-          0%, 100% { transform: scale(0.2); }
-          50% { transform: scale(1.0); }
-        }
-        @keyframes pulse-3 {
-          0%, 100% { transform: scale(0.2); }
-          50% { transform: scale(1.0); }
-        }
-        .animate-pulse-1 { animation: pulse-1 2s infinite ease-in-out; }
-        .animate-pulse-2 { animation: pulse-2 2s infinite ease-in-out 0.33s; }
-        .animate-pulse-3 { animation: pulse-3 2s infinite ease-in-out 0.66s; }
-      `}</style>
+    <div
+      className={`animate-spin rounded-full border-2 border-base-300 border-t-primary ${sizeClasses[size]}`}
+      role="status"
+    >
+      <span className="sr-only">Loading...</span>
     </div>
   );
 };
+
+export const AiTypingIndicator: React.FC = () => (
+    <div className="flex items-center gap-2 text-sm text-accent bg-base-300/50 px-3 py-1.5 rounded-md border border-base-300/50 backdrop-blur-sm">
+        <div className="typing-indicator"><div/><div/><div/></div>
+        <span className="font-semibold hidden sm:inline">AI is thinking...</span>
+        <style>{`
+        .typing-indicator{display:flex;align-items:center;justify-content:center}
+        .typing-indicator div{width:4px;height:4px;background-color:currentColor;border-radius:50%;margin:0 2px;animation:typing-wave 1.2s infinite ease-in-out}
+        .typing-indicator div:nth-child(2){animation-delay:.1s}
+        .typing-indicator div:nth-child(3){animation-delay:.2s}
+        @keyframes typing-wave{0%,60%,100%{transform:initial}30%{transform:translateY(-4px)}}
+        `}</style>
+    </div>
+);
+
 
 export default Spinner;

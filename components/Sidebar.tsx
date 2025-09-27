@@ -1,31 +1,54 @@
 import React, { useState } from 'react';
 import FileExplorer from './FileExplorer';
-import ChatInterface from './ChatInterface';
-import { CodeIcon, ChatBubbleIcon } from './icons';
-import { FileNode, AiChatMessage } from '../types';
+import { CodeIcon, ChatBubbleIcon, SaveIcon } from './icons';
+import { FileNode, AiChatMessage, User, Project, ApiConfig, ApiPoolConfig, ApiPoolKey, ChatMessageSenderInfo } from '../types';
 // FIX: Imported Spinner component to resolve reference error.
 import Spinner from './ui/Spinner';
 
 interface SidebarProps {
   files: FileNode[];
-  // FIX: Renamed 'selectedFileId' to 'selectedFilePath' for clarity and consistency.
   selectedFilePath: string | null;
   onFileSelect: (id: string) => void;
   onFileDelete: (id:string) => void;
   onFileAdd: (parentId: string, type: 'file' | 'folder') => void;
   onFileUpload: (file: File, parentPath: string) => void;
-  chatMessages: AiChatMessage[];
-  // FIX: Updated 'onSendMessage' to include the 'mode' parameter to match ChatInterface's signature.
-  onSendMessage: (message: string, mode: 'build' | 'ask') => void;
-  isAiLoading: boolean;
-  onApprovePlan: (messageId: string) => void;
-  onRejectPlan: (messageId: string) => void;
-  activeTab: 'files' | 'chat';
-  onTabChange: (tab: 'files' | 'chat') => void;
+  activeTab: 'files' | 'snapshots';
+  onTabChange: (tab: 'files' | 'snapshots') => void;
   isGenerating: boolean;
+  onContextMenuRequest: (path: string, x: number, y: number) => void;
+  isCollaborationEnabled: boolean;
 }
 
-type Tab = 'files' | 'chat';
+type Tab = 'files' | 'snapshots';
+
+const SnapshotsPanel: React.FC<{ isCollaborationEnabled: boolean }> = ({ isCollaborationEnabled }) => {
+    // This is a placeholder for the full snapshot UI
+    return (
+        <div className="p-4 text-sm text-neutral h-full flex flex-col">
+            <h3 className="text-sm font-semibold tracking-wider uppercase text-base-content mb-4 border-b border-base-300 pb-2">Project Snapshots</h3>
+            {!isCollaborationEnabled ? (
+                <div className="flex-grow flex items-center justify-center text-center">
+                    <div>
+                        <SaveIcon className="w-12 h-12 text-base-300 mx-auto mb-4" />
+                        <h4 className="font-semibold text-base-content">Feature Disabled</h4>
+                        <p className="mt-1">To enable Snapshots, the project owner must first configure a custom Firebase server in Project Settings.</p>
+                    </div>
+                </div>
+            ) : (
+                <div className="flex-grow">
+                    <button className="w-full text-center py-2 bg-primary hover:opacity-90 text-white font-semibold rounded-md transition-colors text-sm">
+                        Create New Snapshot
+                    </button>
+                    <div className="mt-4 text-center">
+                        <p>Your snapshots will appear here.</p>
+                         {/* Snapshot list would be rendered here */}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 const Sidebar: React.FC<SidebarProps> = (props) => {
   const { activeTab, onTabChange } = props;
@@ -42,8 +65,8 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
         <button onClick={() => onTabChange('files')} className={tabClasses('files')}>
           <CodeIcon /> Files
         </button>
-        <button onClick={() => onTabChange('chat')} className={tabClasses('chat')}>
-          <ChatBubbleIcon /> Chat
+        <button onClick={() => onTabChange('snapshots')} className={tabClasses('snapshots')}>
+          <SaveIcon /> Snapshots
         </button>
       </div>
       <div className="flex-grow overflow-hidden">
@@ -62,17 +85,12 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
                     onFileDelete={props.onFileDelete}
                     onFileAdd={props.onFileAdd}
                     onFileUpload={props.onFileUpload}
+                    onContextMenuRequest={props.onContextMenuRequest}
                 />
             )
         )}
-        {activeTab === 'chat' && (
-          <ChatInterface 
-            messages={props.chatMessages} 
-            onSendMessage={props.onSendMessage}
-            isLoading={props.isAiLoading}
-            onApprovePlan={props.onApprovePlan}
-            onRejectPlan={props.onRejectPlan}
-          />
+        {activeTab === 'snapshots' && (
+            <SnapshotsPanel isCollaborationEnabled={props.isCollaborationEnabled} />
         )}
       </div>
     </div>

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AiChatMessage, AiPlan } from '../types';
+import { AiChatMessage, AiPlan, ChatMessageSenderInfo, FileNode, Project, ApiConfig, ApiPoolConfig, ApiPoolKey, User } from '../types';
+import { UserIcon, AiIcon, FileIcon, DeleteIcon, RobotIcon, CodeIcon, AnalyzeIcon, BrainIcon, RocketIcon, CopyIcon, CheckIcon, UsersIcon } from './icons';
+import { generateCodeSnippet } from '../services/aiService';
 import Spinner from './ui/Spinner';
-import { UserIcon, AiIcon, FileIcon, DeleteIcon, RobotIcon, CodeIcon, AnalyzeIcon, BrainIcon, RocketIcon, CopyIcon, CheckIcon } from './icons';
 
 interface PlanReviewMessageProps {
     plan: AiPlan;
@@ -19,8 +20,8 @@ const CodeBlock: React.FC<{ language: string, code: string }> = ({ language, cod
     };
 
     return (
-        <div className="bg-base-300 rounded-md my-2 text-base-content code-block">
-            <div className="flex items-center justify-between px-3 py-1 bg-base-100/50 rounded-t-md text-xs text-neutral">
+        <div className="bg-base-100 rounded-md my-2 text-base-content code-block border border-base-300">
+            <div className="flex items-center justify-between px-3 py-1 bg-base-200/50 rounded-t-md text-xs text-neutral">
                 <span>{language || 'code'}</span>
                 <button onClick={handleCopy} className="flex items-center gap-1 hover:text-base-content">
                     {copied ? <><CheckIcon className="w-3 h-3 text-green-500" /> Copied!</> : <><CopyIcon className="w-3 h-3" /> Copy</>}
@@ -31,36 +32,56 @@ const CodeBlock: React.FC<{ language: string, code: string }> = ({ language, cod
     );
 };
 
-const MarkdownRenderer: React.FC<{ text: string }> = ({ text }) => {
-    const renderableParts: (string | React.ReactElement)[] = [];
-    
-    // Regex to split by code blocks, preserving the delimiters
-    const parts = text.split(/(```[\s\S]*?```)/g);
+const MarkdownRenderer: React.FC<{ text: string, members: ChatMessageSenderInfo[] }> = ({ text, members }) => {
+    const memberMap = new Map(members.map(m => [m.uid, m.displayName]));
 
-    parts.forEach((part, index) => {
-        if (part.startsWith('```')) {
-            const codeBlock = part.slice(3, -3);
-            const firstLine = codeBlock.indexOf('\n');
-            const language = codeBlock.substring(0, firstLine).trim();
-            const code = codeBlock.substring(firstLine + 1).trim();
-            renderableParts.push(<CodeBlock key={index} language={language} code={code} />);
-        } else {
-            // Process inline elements for non-code parts
-            const inlineParts = part.split(/(`[^`]*`)/g);
-            renderableParts.push(
-                <span key={index}>
-                    {inlineParts.map((inlinePart, j) => {
-                        if (inlinePart.startsWith('`') && inlinePart.endsWith('`')) {
-                            return <code key={j} className="bg-base-300/70 text-accent font-mono text-xs px-1.5 py-1 rounded-md">{inlinePart.slice(1, -1)}</code>;
-                        }
-                        return inlinePart;
-                    })}
-                </span>
-            );
-        }
-    });
+    const parts = text
+        .split(/(```[\s\S]*?```|@\[.*?\]\(.*?\))/g) // Split by code blocks and mentions
+        .map((part, i) => {
+            if (!part) return null;
 
-    return <div className="whitespace-pre-wrap">{renderableParts}</div>;
+            // Handle code blocks
+            if (part.startsWith('```')) {
+                const codeBlock = part.slice(3, -3);
+                const firstLineEnd = codeBlock.indexOf('\n');
+                const language = codeBlock.substring(0, firstLineEnd).trim();
+                const code = codeBlock.substring(firstLineEnd + 1).trim();
+                return <CodeBlock key={i} language={language} code={code} />;
+            }
+            
+            // Handle mentions
+            const mentionMatch = part.match(/@\[(.*?)\]\((.*?)\)/);
+            if (mentionMatch) {
+                const name = mentionMatch[1];
+                return <span key={i} className="bg-primary/20 text-primary font-semibold px-1 rounded-sm">@{name}</span>;
+            }
+
+            // Process other markdown
+            return part
+                .split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g) // Split by bold, inline code, italics
+                .map((segment, index) => {
+                    if (segment.startsWith('**') && segment.endsWith('**')) {
+                        return <strong key={index}>{segment.slice(2, -2)}</strong>;
+                    }
+                    if (segment.startsWith('*') && segment.endsWith('*')) {
+                        return <em key={index}>{segment.slice(1, -1)}</em>;
+                    }
+                    if (segment.startsWith('`') && segment.endsWith('`')) {
+                        return <code key={index} className="bg-base-300/70 text-accent font-mono text-xs px-1.5 py-0.5 rounded-md">{segment.slice(1, -1)}</code>;
+                    }
+                    if (/^\s*[*+-]\s/.test(segment)) {
+                        const listItems = segment.trim().split(/\n\s*[*+-]\s/).map((item, j) => {
+                            if (!item.trim()) return null;
+                            const text = j === 0 ? item.replace(/^\s*[*+-]\s/, '') : item;
+                            return <li key={j}>{text}</li>;
+                        }).filter(Boolean);
+                        return <ul key={index} className="list-disc list-inside space-y-1 my-2">{listItems}</ul>;
+                    }
+                    return segment;
+                });
+        });
+
+    return <div className="whitespace-pre-wrap leading-relaxed">{parts.filter(Boolean)}</div>;
 };
 
 
@@ -123,7 +144,7 @@ const PlanReviewMessage: React.FC<PlanReviewMessageProps> = ({ plan, status, onA
             {status === 'rejected' && <p className="text-xs text-red-400 text-right font-semibold">Plan rejected.</p>}
             {status === 'executing' && (
                  <div className="flex items-center justify-end gap-2 text-xs text-blue-400 font-semibold">
-                    <Spinner size="sm" />
+                    <div className="typing-indicator"><div/><div/><div/></div>
                     <span>Executing plan...</span>
                 </div>
             )}
@@ -131,7 +152,7 @@ const PlanReviewMessage: React.FC<PlanReviewMessageProps> = ({ plan, status, onA
     )
 }
 
-const AgentStatusMessage: React.FC<{ message: AiChatMessage }> = ({ message }) => {
+const AgentStatusMessage: React.FC<{ message: AiChatMessage, members: ChatMessageSenderInfo[] }> = ({ message, members }) => {
     const stateInfo = {
         planning: { icon: CodeIcon, color: 'text-blue-400', title: 'Planning' },
         executing: { icon: CodeIcon, color: 'text-blue-400', title: 'Executing Task' },
@@ -151,7 +172,7 @@ const AgentStatusMessage: React.FC<{ message: AiChatMessage }> = ({ message }) =
             </div>
             {message.currentTask && <p className="text-xs text-neutral mb-2"><strong>Task:</strong> {message.currentTask}</p>}
             
-            <p className="text-base-content/90 whitespace-pre-wrap">{message.text}</p>
+            <MarkdownRenderer text={message.text} members={members} />
             
             {message.thoughts && (
                 <div className="mt-3 pt-2 border-t border-base-300/50">
@@ -163,20 +184,56 @@ const AgentStatusMessage: React.FC<{ message: AiChatMessage }> = ({ message }) =
     );
 };
 
+// --- New Rich Message Components ---
+
+const FilePinMessage: React.FC<{ filePath: string; onOpenFile: (path: string) => void }> = ({ filePath, onOpenFile }) => (
+    <button onClick={() => onOpenFile(filePath)} className="flex items-center gap-2 p-2 bg-base-100/50 hover:bg-base-300 rounded-md w-full text-left">
+        <FileIcon className="w-5 h-5 text-neutral shrink-0" />
+        <div>
+            <p className="text-xs text-neutral">File Pinned</p>
+            <p className="font-semibold text-base-content truncate">{filePath}</p>
+        </div>
+    </button>
+);
+
+const CodeSnippetMessage: React.FC<{ code: string; language: string; text: string; members: ChatMessageSenderInfo[] }> = ({ code, language, text, members }) => (
+    <div>
+        <MarkdownRenderer text={text} members={members} />
+        <div className="text-xs text-neutral my-2 font-semibold">Generated Snippet:</div>
+        <CodeBlock language={language} code={code} />
+    </div>
+);
+
 
 interface ChatInterfaceProps {
     messages: AiChatMessage[];
-    onSendMessage: (message: string, mode: 'build' | 'ask') => void;
+    onSendMessage: (message: string, mode: 'build' | 'ask' | 'general') => void;
     isLoading: boolean;
     onApprovePlan: (messageId: string) => void;
     onRejectPlan: (messageId: string) => void;
+    // New props for collaboration
+    projectMembers: ChatMessageSenderInfo[];
+    currentUser: User;
+    isOwner: boolean;
+    files: FileNode[];
+    project: Project | null;
+    apiConfig: ApiConfig;
+    apiPoolConfig: ApiPoolConfig;
+    apiPoolKeys: ApiPoolKey[];
+    currentUserId: string;
+    onSendRichMessage: (messageData: Partial<Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>>) => void;
+    onDeleteMessage: (messageId: string) => void;
+    onOpenFileFromPin: (filePath: string) => void;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, isLoading, onApprovePlan, onRejectPlan }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
+    const { messages, onSendMessage, isLoading, onApprovePlan, onRejectPlan, projectMembers, currentUser, isOwner, files, project, apiConfig, apiPoolConfig, apiPoolKeys, onSendRichMessage, onDeleteMessage, onOpenFileFromPin } = props;
     const [input, setInput] = useState('');
-    const [mode, setMode] = useState<'build' | 'ask'>('build');
+    const [mode, setMode] = useState<'build' | 'ask' | 'general'>('build');
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [mentionQuery, setMentionQuery] = useState('');
+    const [showMentionPopup, setShowMentionPopup] = useState(false);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -195,96 +252,208 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, 
     const handleSend = (e: React.FormEvent) => {
         e.preventDefault();
         if (input.trim() && !isLoading) {
-            onSendMessage(input.trim(), mode);
+            const text = input.trim();
+
+            if (text.startsWith('/snippet ')) {
+                const prompt = text.substring(9);
+                setInput('');
+                
+                // Fire-and-forget async function to handle snippet generation
+                (async () => {
+                    const senderInfo: ChatMessageSenderInfo = {
+                        uid: currentUser.uid, displayName: currentUser.displayName || currentUser.email || null, photoURL: currentUser.photoURL || null,
+                    };
+                    onSendRichMessage({ senderInfo, type: 'text', text: `Generating snippet for: \`${prompt}\`...` });
+                    
+                    try {
+                        if (!project) throw new Error("Project context not available.");
+                        const code = await generateCodeSnippet(prompt, project, apiConfig, currentUser.uid, apiPoolConfig, apiPoolKeys);
+                        onSendRichMessage({ senderInfo, type: 'code_snippet', text: `Here's a snippet for \`${prompt}\`...`, code: code, language: '' });
+                    } catch (err) {
+                        const message = err instanceof Error ? err.message : "An unknown error occurred.";
+                        onSendRichMessage({ senderInfo, type: 'text', text: `Sorry, snippet generation failed: ${message}` });
+                    }
+                })();
+                return;
+            }
+
+            if (isCollaborationEnabled()) {
+                const mentionedUsers = projectMembers.filter(m => text.includes(`@[${m.displayName}](${m.uid})`));
+                onSendRichMessage({ type: 'text', text: text, mentions: mentionedUsers.map(m => m.uid) });
+            } else {
+                onSendMessage(text, mode);
+            }
             setInput('');
         }
     };
     
-    const ModeButton: React.FC<{ value: 'build' | 'ask', children: React.ReactNode }> = ({ value, children }) => (
-        <button
-            type="button"
-            onClick={() => setMode(value)}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === value ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}
-        >
-            {children}
-        </button>
+    const isCollaborationEnabled = () => project?.members.length > 1;
+
+    const placeholders = {
+        build: "Describe a change or type /snippet...",
+        ask: "Ask a question about your project...",
+        general: "Ask me anything...",
+    }
+
+    const handleMentionSelect = (member: ChatMessageSenderInfo) => {
+        const atIndex = input.lastIndexOf('@');
+        const newText = `${input.substring(0, atIndex)}@[${member.displayName}](${member.uid}) `;
+        setInput(newText);
+        setShowMentionPopup(false);
+        textareaRef.current?.focus();
+    };
+    
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const text = e.target.value;
+        setInput(text);
+        const atIndex = text.lastIndexOf('@');
+        if (atIndex !== -1 && text.substring(atIndex + 1).match(/^[a-zA-Z0-9_]*$/)) {
+             setMentionQuery(text.substring(atIndex + 1));
+             setShowMentionPopup(true);
+        } else {
+             setShowMentionPopup(false);
+        }
+    };
+
+    const filteredMembers = projectMembers.filter(m =>
+        m.uid !== currentUser.uid &&
+        m.displayName?.toLowerCase().includes(mentionQuery.toLowerCase())
     );
 
     const renderMessageContent = (msg: AiChatMessage) => {
-        if (msg.isAgentMessage) {
-            return <AgentStatusMessage message={msg} />;
+        if (msg.isDeleted) {
+            return <p className="italic text-neutral/70">{msg.text}</p>
         }
-        return (
-            <>
-                <MarkdownRenderer text={msg.text} />
-                {msg.plan && msg.planStatus && (
-                    <PlanReviewMessage 
-                        plan={msg.plan}
-                        status={msg.planStatus}
-                        onApprove={() => onApprovePlan(msg.id)}
-                        onReject={() => onRejectPlan(msg.id)}
-                    />
-                )}
-                {msg.isLoading && (
-                    <div className="flex items-center gap-2 text-xs text-neutral pt-2">
-                        <Spinner size="sm" />
-                        <span>Thinking...</span>
-                    </div>
-                )}
-            </>
-        );
+        
+        switch (msg.type) {
+            case 'file_pin':
+                return msg.filePath ? <FilePinMessage filePath={msg.filePath} onOpenFile={onOpenFileFromPin} /> : <MarkdownRenderer text={msg.text} members={projectMembers} />;
+            case 'code_snippet':
+                return msg.code ? <CodeSnippetMessage code={msg.code} language={msg.language || ''} text={msg.text} members={projectMembers} /> : <MarkdownRenderer text={msg.text} members={projectMembers} />;
+            default: // 'text' and undefined
+                if (msg.isAgentMessage) {
+                    return <AgentStatusMessage message={msg} members={projectMembers}/>;
+                }
+                return (
+                    <>
+                        <MarkdownRenderer text={msg.text} members={projectMembers} />
+                        {msg.plan && msg.planStatus && (
+                            <PlanReviewMessage 
+                                plan={msg.plan}
+                                status={msg.planStatus}
+                                onApprove={() => onApprovePlan(msg.id)}
+                                onReject={() => onRejectPlan(msg.id)}
+                            />
+                        )}
+                        {msg.isLoading && (
+                            <div className="flex items-center gap-2 pt-2">
+                               <div className="typing-indicator"><div/><div/><div/></div>
+                            </div>
+                        )}
+                    </>
+                );
+        }
     };
+
+    const senderFor = (msg: AiChatMessage) => {
+      if (msg.sender === 'ai') return 'ai';
+      return msg.senderInfo?.uid || 'user_fallback';
+    }
 
     return (
         <div className="h-full bg-base-100 flex flex-col">
             <div className="p-3 mb-2 border-b border-base-300">
-                <h3 className="text-sm font-semibold tracking-wider uppercase text-base-content">Chat</h3>
+                <div className="flex items-center gap-2">
+                    {isCollaborationEnabled() && <UsersIcon className="w-5 h-5 text-secondary" />}
+                    <h3 className="text-sm font-semibold tracking-wider uppercase text-base-content">
+                        {isCollaborationEnabled() ? "Team Chat" : "AI Chat"}
+                    </h3>
+                </div>
             </div>
-            <div className="flex-grow overflow-y-auto p-4 space-y-8">
-                {messages.map((msg) => (
-                    <div key={msg.id} className={`flex items-start gap-4 ${msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                         <div className={`w-10 h-10 mt-1 rounded-full flex items-center justify-center shrink-0 text-white ${
-                            msg.sender === 'user' ? 'bg-primary' : (msg.isAgentMessage ? 'bg-secondary' : 'bg-accent')
-                         }`}>
-                            {msg.sender === 'user' ? <UserIcon className="w-5 h-5" /> : (msg.isAgentMessage ? <RobotIcon className="w-5 h-5" /> : <AiIcon className="w-5 h-5" />)}
+            <div className="flex-grow overflow-y-auto p-4 space-y-4">
+                {messages.map((msg, index) => {
+                    const prevMsg = messages[index - 1];
+                    const showHeader = !prevMsg || senderFor(prevMsg) !== senderFor(msg) || msg.sender === 'ai';
+                    
+                    return (
+                        <div key={msg.id} className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            {msg.sender === 'ai' && (
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white ${msg.isAgentMessage ? 'bg-secondary' : 'bg-accent'}`}>
+                                {msg.isAgentMessage ? <RobotIcon className="w-5 h-5" /> : <AiIcon className="w-5 h-5" />}
+                              </div>
+                            )}
+                            <div className={`w-auto max-w-lg lg:max-w-xl group relative ${msg.sender === 'user' ? 'items-end' : 'items-start'} flex flex-col`}>
+                               {showHeader && msg.sender === 'user' && msg.senderInfo && (
+                                   <p className="text-xs text-neutral mb-1 pr-10">{msg.senderInfo.displayName}</p>
+                               )}
+                               {showHeader && msg.sender === 'ai' && (
+                                   <p className="text-xs text-neutral mb-1 pl-1">ASAI</p>
+                               )}
+
+                                <div className={`rounded-lg text-sm shadow-md px-4 py-3 ${
+                                   msg.sender === 'user' ? 'bg-primary text-white rounded-br-none' : 'bg-base-200 text-base-content rounded-bl-none'
+                                }`}>
+                                   {renderMessageContent(msg)}
+                                </div>
+                                {isOwner && msg.sender === 'user' && !msg.isDeleted && (
+                                    <button onClick={() => onDeleteMessage(msg.id)} className="absolute top-0 right-0 p-1 bg-base-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" title="Delete message">
+                                        <DeleteIcon className="w-3 h-3 text-red-400" />
+                                    </button>
+                                )}
+                            </div>
+                             {msg.sender === 'user' && msg.senderInfo && (
+                               <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-base-300 text-base-content overflow-hidden">
+                                {msg.senderInfo.photoURL ? <img src={msg.senderInfo.photoURL} alt={msg.senderInfo.displayName || ''} className="w-full h-full object-cover" /> : <UserIcon className="w-5 h-5" />}
+                              </div>
+                            )}
                         </div>
-                        <div className={`w-full max-w-lg lg:max-w-xl rounded-lg text-sm shadow-md px-4 py-3 ${
-                           msg.sender === 'user' ? 'bg-primary text-white' : 'bg-base-200 text-base-content'
-                        }`}>
-                           {renderMessageContent(msg)}
-                        </div>
-                    </div>
-                ))}
+                    )
+                })}
                 {isLoading && messages.every(m => !m.isLoading) && (
-                    <div className="flex items-start gap-4 flex-row">
-                        <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-accent text-white">
+                    <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-accent text-white">
                             <AiIcon className="w-5 h-5" />
                         </div>
-                        <div className="bg-base-200 rounded-lg px-4 py-3 text-sm shadow-md">
-                            <Spinner size="sm" />
+                        <div className="bg-base-200 rounded-lg px-4 py-3 text-sm shadow-md rounded-bl-none">
+                            <div className="typing-indicator"><div/><div/><div/></div>
                         </div>
                     </div>
                 )}
                  <div ref={messagesEndRef} />
             </div>
             <form onSubmit={handleSend} className="p-2 border-t border-base-300">
-                 <div className="flex items-center gap-2 mb-2 px-1">
-                    <ModeButton value="build">Build</ModeButton>
-                    <ModeButton value="ask">Ask</ModeButton>
-                </div>
+                 {!isCollaborationEnabled() && (
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                        <button type="button" onClick={() => setMode('build')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'build' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Build</button>
+                        <button type="button" onClick={() => setMode('ask')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'ask' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Ask Project</button>
+                        <button type="button" onClick={() => setMode('general')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'general' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Ask General</button>
+                    </div>
+                 )}
                 <div className="relative">
+                    {showMentionPopup && filteredMembers.length > 0 && (
+                        <div className="absolute bottom-full mb-2 w-full bg-base-300 rounded-lg shadow-lg p-2 z-20 max-h-48 overflow-y-auto">
+                            {filteredMembers.map(member => (
+                                <div key={member.uid} onClick={() => handleMentionSelect(member)} className="flex items-center gap-2 p-2 hover:bg-primary/20 rounded-md cursor-pointer">
+                                    <div className="w-6 h-6 rounded-full overflow-hidden shrink-0">
+                                       {member.photoURL ? <img src={member.photoURL} className="w-full h-full object-cover" /> : <UserIcon className="w-4 h-4" />}
+                                    </div>
+                                    <span className="font-semibold">{member.displayName}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                     <textarea
                         ref={textareaRef}
                         rows={1}
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
+                        onChange={handleInputChange}
                         onKeyDown={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {
                                 e.preventDefault();
                                 handleSend(e);
                             }
                         }}
-                        placeholder={mode === 'build' ? "Describe a change or new feature..." : "Ask a question about your project..."}
+                        placeholder={isCollaborationEnabled() ? "Type a message, @ to mention, or /snippet..." : placeholders[mode]}
                         className="w-full bg-base-200 border border-base-300/80 rounded-md py-2 pl-3 pr-10 text-base-content focus:outline-none focus:ring-2 focus:ring-primary resize-none max-h-40"
                         disabled={isLoading}
                     />
@@ -293,6 +462,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, 
                     </button>
                 </div>
             </form>
+            <style>{`.typing-indicator{display:flex;align-items:center;justify-content:center}.typing-indicator div{width:6px;height:6px;background-color:var(--color-neutral);border-radius:50%;margin:0 2px;animation:typing-wave 1.2s infinite ease-in-out}.typing-indicator div:nth-child(2){animation-delay:.1s}.typing-indicator div:nth-child(3){animation-delay:.2s}@keyframes typing-wave{0%,60%,100%{transform:initial}30%{transform:translateY(-6px)}}`}</style>
         </div>
     );
 };

@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 // FIX: Import admin-related types to support the new feature.
-import { User, Project, ApiConfig, AiProvider, ApiPoolConfig, ApiPoolKey, AdminUser } from '../types';
-// FIX: Import firestore functions for admin panel.
-import { getUserProjects, saveApiPoolConfig, addApiPoolKey, deleteApiPoolKey, joinProjectByShareKey, getCollectionCount, getAllUsers } from '../services/firestoreService';
-import Spinner from '../components/ui/Spinner';
-import { CodeIcon, KeyIcon, RocketIcon, UserIcon, SettingsIcon, UsersIcon, ReactIcon } from '../components/icons';
+import { User, Project, ApiConfig, AiProvider, ApiPoolConfig, ApiPoolKey, AdminUser, UserUsageStats, AdminSettings, AdminStats, PlatformError } from '../types';
+// FIX: Import firestore functions for admin panel and usage stats.
+import { getUserProjects, saveApiPoolConfig, addApiPoolKey, deleteApiPoolKey, joinProjectByShareKey, getCollectionCount, getAllUsers, getUserFileStats, updateUserTokenBalance, getAdminSettings, saveAdminSettings, getPlatformErrors, acceptInvite } from '../services/firestoreService';
+import Spinner, { AiTypingIndicator } from '../components/ui/Spinner';
+import { CodeIcon, KeyIcon, RocketIcon, UserIcon, SettingsIcon, UsersIcon, ReactIcon, FileIcon, DatabaseIcon, InformationCircleIcon, TokenIcon } from '../components/icons';
 import ApiKeyModal from '../components/ApiKeyModal';
 import ProfileSettingsModal from '../components/ProfileSettingsModal';
 // FIX: Import the new AdminPanelModal.
 import AdminPanelModal from '../components/AdminPanelModal';
+import { auth } from '../services/firebase';
+import { formatTokens } from '../utils/formatters';
 
 
 interface DashboardProps {
@@ -22,6 +24,8 @@ interface DashboardProps {
     apiPoolKeys: ApiPoolKey[];
     setApiPoolConfig: (config: ApiPoolConfig) => void;
     setApiPoolKeys: (keys: ApiPoolKey[]) => void;
+    onShowDocs: () => void;
+    refreshUserProfile: () => void;
 }
 
 const modelOptions = {
@@ -59,15 +63,15 @@ const NewProjectBuilder: React.FC<{ onStartBuilding: (prompt: string, provider: 
     };
     
     return (
-        <div className="bg-base-200 rounded-lg p-6 border border-base-300 shadow-sm mb-12">
-            <h2 className="text-2xl font-bold mb-4 text-base-content">Start a New Project</h2>
+        <div className="bg-gradient-to-br from-base-200 to-base-200/50 rounded-xl p-6 border border-base-300 shadow-lg shadow-primary/5">
+            <h2 className="text-2xl font-bold mb-4 text-base-content flex items-center gap-3"><RocketIcon className="w-6 h-6" /> Start a New Project</h2>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                  <textarea 
                     value={prompt}
                     onChange={e => setPrompt(e.target.value)}
-                    rows={2}
+                    rows={3}
                     placeholder="e.g., A pomodoro timer with a customizable work/break cycle..."
-                    className="w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"
+                    className="w-full bg-base-100/70 border border-base-300 rounded-md py-3 px-4 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"
                     disabled={isLoading}
                 />
                 <div className="flex flex-col sm:flex-row items-start gap-4">
@@ -96,9 +100,9 @@ const NewProjectBuilder: React.FC<{ onStartBuilding: (prompt: string, provider: 
                     <button 
                         type="submit" 
                         disabled={isLoading || !prompt.trim()} 
-                        className="w-full sm:w-auto px-6 py-2 h-11 bg-primary hover:bg-primary/90 text-white font-semibold rounded-md transition-all flex items-center justify-center gap-2 shrink-0 disabled:bg-primary/50 disabled:cursor-not-allowed sm:ml-auto"
+                        className="w-full sm:w-auto px-6 py-2 h-11 bg-primary hover:bg-primary/90 text-white font-semibold rounded-md transition-all flex items-center justify-center gap-2 shrink-0 disabled:bg-primary/50 disabled:cursor-not-allowed sm:ml-auto btn-shine"
                     >
-                        {isLoading ? <Spinner size="sm"/> : <><RocketIcon className="w-5 h-5"/> <span>Start Building</span></>}
+                        {isLoading ? <Spinner size="sm"/> : <>Start Building</>}
                     </button>
                 </div>
             </form>
@@ -120,14 +124,14 @@ const JoinProject: React.FC<{ onJoin: (key: string) => Promise<void> }> = ({ onJ
     };
 
     return (
-        <div className="bg-base-200 rounded-lg p-6 border border-base-300 shadow-sm">
+        <div className="bg-base-200 rounded-xl p-6 border border-base-300">
             <h3 className="text-xl font-bold mb-3 text-base-content">Join a Project</h3>
             <form onSubmit={handleSubmit} className="flex items-center gap-4">
                 <input
                     type="text"
                     value={key}
                     onChange={e => setKey(e.target.value)}
-                    placeholder="Enter share key..."
+                    placeholder="Enter share key or invite code..."
                     className="flex-grow bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary"
                     disabled={isLoading}
                 />
@@ -153,6 +157,8 @@ const DashboardPage: React.FC<DashboardProps> = ({
     apiPoolKeys,
     setApiPoolConfig,
     setApiPoolKeys,
+    onShowDocs,
+    refreshUserProfile
 }) => {
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(true);
@@ -160,27 +166,52 @@ const DashboardPage: React.FC<DashboardProps> = ({
     const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
     const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
     const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
-    const [adminStats, setAdminStats] = useState<{users: number, projects: number} | null>(null);
+    const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
     const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+    const [adminSettings, setAdminSettings] = useState<AdminSettings>({ dailyTokenReward: 1000000 });
+    const [platformErrors, setPlatformErrors] = useState<PlatformError[]>([]);
+    const [usageStats, setUsageStats] = useState<UserUsageStats | null>(null);
+    const [apiCallCount, setApiCallCount] = useState<number>(0);
     
-    const fetchProjects = useCallback(async () => {
-        if (!user?.uid) {
-            return;
-        }
+    const userMenuRef = useRef<HTMLDivElement>(null);
+
+    const fetchDashboardData = useCallback(async () => {
+        if (!user?.uid) return;
         setLoading(true);
         try {
-            const userProjects = await getUserProjects(user.uid);
+            const [userProjects, fileStats] = await Promise.all([
+                getUserProjects(user.uid),
+                getUserFileStats(user.uid)
+            ]);
             setProjects(userProjects);
+            setUsageStats({
+                projectCount: userProjects.length,
+                fileCount: fileStats.fileCount,
+                dataStoredBytes: fileStats.totalSize,
+            });
+            const calls = parseInt(localStorage.getItem('asai_api_call_count') || '0', 10);
+            setApiCallCount(calls);
         } catch (error) {
-            console.error("Failed to fetch projects:", error);
+            console.error("Failed to fetch dashboard data:", error);
         } finally {
             setLoading(false);
         }
     }, [user]);
 
     useEffect(() => {
-        fetchProjects();
-    }, [fetchProjects]);
+        fetchDashboardData();
+    }, [fetchDashboardData]);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+                setIsUserMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
     
     const handleStart = async (prompt: string, provider: AiProvider, model: string) => {
         setIsCreating(true);
@@ -189,24 +220,40 @@ const DashboardPage: React.FC<DashboardProps> = ({
 
     const handleJoinProject = async (key: string) => {
         try {
-            const joinedProject = await joinProjectByShareKey(key, user.uid);
-            alert(`Successfully joined project: ${joinedProject.name}`);
-            await fetchProjects();
-        } catch (error) {
-            alert(`Failed to join project: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            // First, try to join as a real-time collaborator via invite code
+            const joinedProject = await acceptInvite(key, user.uid, user.email);
+            alert(`Successfully joined collaborative project: ${joinedProject.name}`);
+        } catch (inviteError) {
+             // If invite fails, try as a simple share key
+            try {
+                const joinedProject = await joinProjectByShareKey(key, user.uid);
+                alert(`Successfully joined project: ${joinedProject.name}`);
+            } catch (shareError) {
+                const finalError = inviteError instanceof Error ? inviteError.message : String(inviteError);
+                alert(`Failed to join project: ${finalError}`);
+            }
+        } finally {
+            await fetchDashboardData();
         }
     };
     
     const openAdminPanel = async () => {
       setIsAdminPanelOpen(true);
+      setAdminUsers([]); // Clear old data
+      setAdminStats(null);
+      setPlatformErrors([]);
       try {
-        const [userCount, projectCount, users] = await Promise.all([
+        const [userCount, projectCount, users, settings, errors] = await Promise.all([
           getCollectionCount('users'),
           getCollectionCount('projects'),
-          getAllUsers()
+          getAllUsers(),
+          getAdminSettings(),
+          getPlatformErrors(),
         ]);
-        setAdminStats({ users: userCount, projects: projectCount });
+        setAdminStats({ userCount, projectCount, totalFiles: 0, totalDataStored: 0 }); // Placeholder for global file stats
         setAdminUsers(users);
+        setAdminSettings(settings);
+        setPlatformErrors(errors);
       } catch (error) {
         console.error("Failed to fetch admin data:", error);
       }
@@ -227,31 +274,69 @@ const DashboardPage: React.FC<DashboardProps> = ({
         setApiPoolKeys(apiPoolKeys.filter(k => k.id !== keyId));
     };
 
+    const handleUpdateUserTokens = async (userId: string, newBalance: number) => {
+        await updateUserTokenBalance(userId, newBalance);
+        // Refresh the user list in the admin panel to show the new balance
+        const updatedUsers = await getAllUsers();
+        setAdminUsers(updatedUsers);
+    };
+    
+    const handleSaveAdminSettings = async (settings: AdminSettings) => {
+        await saveAdminSettings(settings);
+        setAdminSettings(settings);
+    };
+
     const getProjectIcon = (project: Project) => {
         if (project.iconSvg) {
             try {
                 const svgDataUrl = `data:image/svg+xml;base64,${btoa(project.iconSvg)}`;
-                return <img src={svgDataUrl} alt={project.name} className="w-6 h-6 object-contain" />;
+                return <img src={svgDataUrl} alt={project.name} className="w-8 h-8 object-contain" />;
             } catch (e) {
                 console.error("Failed to parse project SVG:", e);
             }
         }
         if (project.type.toLowerCase().includes('react')) {
-            return <ReactIcon className="w-6 h-6 text-cyan-500" />;
+            return <ReactIcon className="w-8 h-8 text-cyan-400" />;
         }
-        return <CodeIcon className="w-6 h-6 text-neutral" />;
+        return <CodeIcon className="w-8 h-8 text-neutral" />;
     };
 
+    const StatCard: React.FC<{ title: string; value: React.ReactNode; icon: React.ReactNode }> = ({ title, value, icon }) => (
+        <div className="bg-base-200 p-5 rounded-xl flex items-center gap-5 border border-base-300 transition-all hover:border-primary/50 hover:bg-base-200/80">
+          <div className="p-3 bg-primary/10 rounded-lg text-primary">
+              {icon}
+          </div>
+          <div>
+              <p className="text-sm text-neutral font-medium">{title}</p>
+              <div className="text-2xl font-bold text-base-content">{value}</div>
+          </div>
+        </div>
+    );
+    
+    const formatBytes = (bytes: number, decimals = 2) => {
+        if (!bytes || bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
 
     return (
         <div className="min-h-screen bg-base-100 text-base-content">
-            <header className="bg-base-200 z-40 border-b border-base-300">
-                <div className="max-w-7xl mx-auto p-4 flex justify-between items-center">
+            <header className="bg-base-200/50 backdrop-blur-sm sticky top-0 z-40 border-b border-base-300">
+                <div className="max-w-7xl mx-auto p-4 flex justify-between items-center relative">
                     <div className="flex items-center gap-3">
                        <div className="bg-primary p-2 rounded-md"><CodeIcon className="w-6 h-6 text-white"/></div>
                        <h1 className="text-xl font-bold text-base-content">ASAI Dashboard</h1>
                     </div>
+                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+                        {isCreating && <AiTypingIndicator />}
+                    </div>
                     <div className="flex items-center gap-2">
+                         <button onClick={onShowDocs} className="p-2 rounded-full hover:bg-base-300 transition-colors" title="Documentation">
+                            <InformationCircleIcon className="w-5 h-5 text-neutral" />
+                        </button>
                         {user.isAdmin && (
                             <button onClick={openAdminPanel} className="p-2 rounded-full hover:bg-base-300 transition-colors" title="Admin Panel">
                                 <SettingsIcon className="w-5 h-5 text-neutral" />
@@ -260,65 +345,124 @@ const DashboardPage: React.FC<DashboardProps> = ({
                         <button onClick={() => setIsApiKeyModalOpen(true)} className="p-2 rounded-full hover:bg-base-300 transition-colors" title="API Key Settings">
                             <KeyIcon className="w-5 h-5 text-neutral" />
                         </button>
-                         <button onClick={() => setIsProfileModalOpen(true)} className="flex items-center gap-2 p-1 rounded-full hover:bg-base-300" title="Profile Settings">
-                            <span className="text-sm text-neutral hidden sm:inline">{user.displayName || user.email}</span>
-                             {user.photoURL ? (
-                                 <img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full object-cover"/>
-                             ) : (
-                                 <div className="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center">
-                                     <UserIcon className="w-5 h-5 text-neutral"/>
-                                 </div>
-                             )}
-                         </button>
+                         <div className="relative" ref={userMenuRef}>
+                            <button onClick={() => setIsUserMenuOpen(prev => !prev)} className="flex items-center gap-2 p-1 rounded-full hover:bg-base-300" title="Profile Settings">
+                                <span className="text-sm text-neutral hidden sm:inline">{user.displayName || user.email}</span>
+                                 {user.photoURL ? (
+                                     <img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full object-cover"/>
+                                 ) : (
+                                     <div className="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center">
+                                         <UserIcon className="w-5 h-5 text-neutral"/>
+                                     </div>
+                                 )}
+                            </button>
+                             {isUserMenuOpen && (
+                                <div className="absolute right-0 mt-2 w-48 bg-base-200 rounded-md shadow-lg z-50 border border-base-300 py-1">
+                                    <button
+                                        onClick={() => { setIsProfileModalOpen(true); setIsUserMenuOpen(false); }}
+                                        className="w-full text-left px-4 py-2 text-sm text-base-content hover:bg-base-300"
+                                    >
+                                        Profile Settings
+                                    </button>
+                                    <button
+                                        onClick={() => auth.signOut()}
+                                        className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-base-300"
+                                    >
+                                        Sign Out
+                                    </button>
+                                </div>
+                            )}
+                         </div>
                     </div>
                 </div>
             </header>
             <main className="p-4 sm:p-8 max-w-7xl mx-auto">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                    <div className="lg:col-span-2">
+                <div className="mb-12">
+                    <h1 className="text-3xl font-bold text-base-content">Welcome back, {user.displayName || user.email?.split('@')[0]}!</h1>
+                    <p className="text-neutral mt-1">Let's build something amazing today.</p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                    {/* Left Column */}
+                    <div className="lg:col-span-3 flex flex-col gap-8">
                         <NewProjectBuilder onStartBuilding={handleStart} isLoading={isCreating} />
+
+                        <div>
+                            <h2 className="text-2xl font-bold mb-6">Your Projects</h2>
+                             {loading ? (
+                                <div className="flex justify-center pt-16"><Spinner size="lg"/></div>
+                            ) : projects.length === 0 ? (
+                                <div className="text-center py-16 border-2 border-dashed border-base-300 rounded-xl bg-base-200/50 mt-6 lg:col-span-3">
+                                    <CodeIcon className="w-16 h-16 text-base-300 mx-auto mb-4" />
+                                    <h3 className="text-xl font-semibold text-base-content">Your workspace is ready</h3>
+                                    <p className="text-neutral mt-2">Use the builder above to create your first project with AI.</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    {projects.map(project => (
+                                        <div key={project.id} onClick={() => onSelectProject(project.id)} className="bg-base-200 rounded-xl p-5 cursor-pointer group hover:-translate-y-1 transition-all border border-base-300 hover:border-primary shadow-sm hover:shadow-lg hover:shadow-primary/10">
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div className="p-3 bg-base-300/70 rounded-lg group-hover:bg-primary/10 transition-colors">
+                                                    {getProjectIcon(project)}
+                                                </div>
+                                                {project.members && project.members.length > 1 && (
+                                                    <div className="flex items-center gap-1.5 text-xs text-neutral bg-base-300 px-2 py-1 rounded-full" title={`${project.members.length} collaborators`}>
+                                                        <UsersIcon className="w-4 h-4" />
+                                                        <span>{project.members.length}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <h3 className="font-bold text-lg text-base-content truncate group-hover:text-primary transition-colors">{project.name}</h3>
+                                            <p className="text-sm text-neutral mt-1 h-10 overflow-hidden text-ellipsis">{project.prompt || 'No description'}</p>
+                                            <div className="text-xs text-neutral/80 mt-4 flex justify-between items-center border-t border-base-300/50 pt-3">
+                                                 <span>{project.type}</span>
+                                                <span>{project.createdAt?.toDate().toLocaleDateString()}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
-                    <div>
+                    {/* Right Column */}
+                    <div className="lg:col-span-2 flex flex-col gap-8">
+                        <div>
+                            <h2 className="text-2xl font-bold mb-6">Usage Statistics</h2>
+                            <div className="space-y-4">
+                               <StatCard 
+                                    title="Token Balance" 
+                                    value={user.tokenBalance !== undefined ? formatTokens(user.tokenBalance) : <Spinner size="sm" />}
+                                    icon={<TokenIcon className="w-6 h-6" />}
+                                />
+                                <StatCard 
+                                    title="Total Projects" 
+                                    value={usageStats ? usageStats.projectCount : <Spinner size="sm" />}
+                                    icon={<CodeIcon className="w-6 h-6" />}
+                                />
+                                <StatCard 
+                                    title="Total Files" 
+                                    value={usageStats ? usageStats.fileCount : <Spinner size="sm" />}
+                                    icon={<FileIcon className="w-6 h-6" />}
+                                />
+                                <StatCard 
+                                    title="Data Stored (Est.)" 
+                                    value={usageStats ? formatBytes(usageStats.dataStoredBytes) : <Spinner size="sm" />}
+                                    icon={<DatabaseIcon className="w-6 h-6" />}
+                                />
+                                <StatCard 
+                                    title="AI API Calls (Session)" 
+                                    value={apiCallCount}
+                                    icon={<RocketIcon className="w-6 h-6" />}
+                                />
+                            </div>
+                        </div>
                         <JoinProject onJoin={handleJoinProject} />
                     </div>
                 </div>
-                
-                <h2 className="text-2xl font-bold mt-12 mb-6">Your Projects</h2>
 
-                {loading ? (
-                    <div className="flex justify-center pt-16"><Spinner size="lg"/></div>
-                ) : projects.length === 0 ? (
-                    <div className="text-center py-16 border-2 border-dashed border-base-300 rounded-lg bg-base-200">
-                        <h3 className="text-xl font-semibold text-base-content">No projects yet</h3>
-                        <p className="text-neutral mt-2">Use the builder above to create your first project with AI.</p>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {projects.map(project => (
-                            <div key={project.id} onClick={() => onSelectProject(project.id)} className="bg-base-200 rounded-lg p-5 cursor-pointer group hover:shadow-lg hover:border-primary/40 transition-all border border-base-300">
-                                <div className="flex justify-between items-start mb-3">
-                                    <div className="p-2 bg-base-300 rounded-md">
-                                        {getProjectIcon(project)}
-                                    </div>
-                                    {project.members && project.members.length > 1 && (
-                                        <div className="flex items-center gap-1.5 text-xs text-neutral bg-base-300 px-2 py-1 rounded-full" title={`${project.members.length} collaborators`}>
-                                            <UsersIcon className="w-4 h-4" />
-                                            <span>{project.members.length}</span>
-                                        </div>
-                                    )}
-                                </div>
-                                <h3 className="font-bold text-lg text-base-content truncate group-hover:text-primary transition-colors">{project.name}</h3>
-                                <p className="text-sm text-neutral mt-1 h-10 overflow-hidden text-ellipsis">{project.prompt}</p>
-                                <div className="text-xs text-neutral/80 mt-4 flex justify-between items-center">
-                                    <span>{project.createdAt?.toDate().toLocaleDateString()}</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
             </main>
             <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onSave={onApiConfigChange} currentConfig={apiConfig} />
-            {user && <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} />}
+            {user && <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />}
             {user.isAdmin && (
                 <AdminPanelModal
                     isOpen={isAdminPanelOpen}
@@ -326,10 +470,14 @@ const DashboardPage: React.FC<DashboardProps> = ({
                     poolConfig={apiPoolConfig}
                     poolKeys={apiPoolKeys}
                     onSaveConfig={handleSavePoolConfig}
-                    onAddKey={handleAddPoolKey}
+                    onAddKey={handleAddPoolKey as any}
                     onDeleteKey={handleDeletePoolKey}
                     stats={adminStats}
                     users={adminUsers}
+                    adminSettings={adminSettings}
+                    platformErrors={platformErrors}
+                    onUpdateUserTokens={handleUpdateUserTokens}
+                    onSaveAdminSettings={handleSaveAdminSettings}
                 />
             )}
         </div>

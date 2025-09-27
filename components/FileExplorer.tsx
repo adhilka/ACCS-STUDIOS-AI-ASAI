@@ -9,6 +9,7 @@ interface FileExplorerProps {
   onFileDelete: (path: string) => void;
   onFileAdd: (path: string, type: 'file' | 'folder') => void;
   onFileUpload: (file: File, parentPath: string) => void;
+  onContextMenuRequest: (path: string, x: number, y: number) => void;
 }
 
 interface TreeNode {
@@ -80,21 +81,21 @@ const TreeNodeComponent: React.FC<{
     level: number;
     selectedFilePath: string | null;
     onFileSelect: (path: string) => void;
-    onFileDelete: (path: string) => void;
-}> = ({ node, level, selectedFilePath, onFileSelect, onFileDelete }) => {
+    onContextMenuRequest: (path: string, x: number, y: number) => void;
+}> = ({ node, level, selectedFilePath, onFileSelect, onContextMenuRequest }) => {
   const isSelected = selectedFilePath === node.path;
 
-  const handleDelete = (e: React.MouseEvent) => {
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
-    if (window.confirm(`Are you sure you want to delete ${node.name}?`)) {
-        onFileDelete(node.path);
-    }
+    onContextMenuRequest(node.path, e.clientX, e.clientY);
   };
 
   return (
     <div>
       <div
         onClick={() => onFileSelect(node.path)}
+        onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${level * 1.25}rem` }}
         className={`flex items-center justify-between pr-2 py-1.5 cursor-pointer rounded-md text-sm group ${
           isSelected ? 'bg-primary text-white' : 'hover:bg-base-300 text-base-content'
@@ -103,9 +104,6 @@ const TreeNodeComponent: React.FC<{
         <div className="flex items-center space-x-2 truncate">
           {node.type === 'folder' ? <FolderIcon className="w-5 h-5 text-sky-500" /> : <FileIcon className="w-5 h-5 text-neutral" />}
           <span className="truncate">{node.name}</span>
-        </div>
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={handleDelete} className="p-1 hover:bg-red-500/20 rounded"><DeleteIcon className="w-4 h-4 text-red-500"/></button>
         </div>
       </div>
       {node.type === 'folder' && node.children && (
@@ -117,7 +115,7 @@ const TreeNodeComponent: React.FC<{
                     level={level + 1} 
                     selectedFilePath={selectedFilePath}
                     onFileSelect={onFileSelect}
-                    onFileDelete={onFileDelete}
+                    onContextMenuRequest={onContextMenuRequest}
                 />
           ))}
         </div>
@@ -127,7 +125,7 @@ const TreeNodeComponent: React.FC<{
 };
 
 
-const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, onFileSelect, onFileDelete, onFileAdd, onFileUpload }) => {
+const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, onFileSelect, onFileDelete, onFileAdd, onFileUpload, onContextMenuRequest }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -211,7 +209,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, on
             level={0}
             selectedFilePath={selectedFilePath}
             onFileSelect={onFileSelect}
-            onFileDelete={onFileDelete}
+            onContextMenuRequest={onContextMenuRequest}
           />
         )) : (
             <div className="text-center text-neutral text-sm mt-4 px-2">

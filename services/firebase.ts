@@ -2,6 +2,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
+import { CustomFirebaseConfig } from '../types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC9uzhgNCtDL11_aQ4PIITHnvJTti57Efw",
@@ -37,4 +38,24 @@ firestore.enablePersistence({ synchronizeTabs: true })
 
 
 export const serverTimestamp = firebase.firestore.FieldValue.serverTimestamp;
+
+export const getSecondaryFirebaseApp = (config: CustomFirebaseConfig, ownerUid: string): firebase.app.App => {
+    const appName = `collab-${ownerUid}`; // Unique name per project owner
+    const existingApp = firebase.apps.find(app => app.name === appName);
+    if (existingApp) {
+        return existingApp;
+    }
+
+    // If not, initialize a new one. This config is for the user's personal Firebase project.
+    // FIX: Removed databaseURL from config as it is not needed for Firestore.
+    return firebase.initializeApp(
+        {
+            apiKey: config.apiKey,
+            authDomain: config.authDomain,
+            projectId: config.projectId,
+        },
+        appName // Unique name for the app instance
+    );
+};
+
 export default firebase;

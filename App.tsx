@@ -1,4 +1,5 @@
-
+// FIX: Import firebase to use its types.
+import firebase from 'firebase/compat/app';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from './hooks/useAuth';
 import LoginPage from './pages/LoginPage';
@@ -8,63 +9,103 @@ import Spinner from './components/ui/Spinner';
 import LandingPage from './pages/LandingPage';
 import { BrandingProvider } from './contexts/BrandingContext';
 // FIX: Import admin-related firestore functions and types.
-import { createProject, getUserApiConfig, saveUserApiConfig, getApiPoolConfig, getApiPoolKeys, ensureUserDocument } from './services/firestoreService';
+import { createProject, getUserApiConfig, saveUserApiConfig, getApiPoolConfig, getApiPoolKeys, ensureUserDocument, getUserProfile, getAdminSettings, updateUserTokenBalance } from './services/firestoreService';
 import { ApiConfig, AiProvider, ApiPoolConfig, ApiPoolKey, User } from './types';
+import DocumentationPage from './pages/DocumentationPage';
 
 // FIX: Encapsulated all logic within the App component to fix scoping issues.
 const App: React.FC = () => {
-    console.log("Hello, World!");
-    const { user, loading } = useAuth();
+    const { user: firebaseUser, loading } = useAuth();
+    const [appUser, setAppUser] = useState<User | null>(null);
     const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
     const [showLogin, setShowLogin] = useState(false);
     
     const [initialGenerationTask, setInitialGenerationTask] = useState<{ prompt: string; provider: AiProvider, model?: string } | null>(null);
     const [isNavigating, setIsNavigating] = useState(false); // Used for interim loading state
     
-    const [apiConfig, setApiConfig] = useState<ApiConfig>({ gemini: null, openrouter: null, groq: null });
+    // FIX: Added 'e2b: null' to the initial state to match the ApiConfig type.
+    const [apiConfig, setApiConfig] = useState<ApiConfig>({ gemini: null, openrouter: null, groq: null, e2b: null });
     
     // FIX: Added state for admin features.
-    const [isAdmin, setIsAdmin] = useState(false);
     const [apiPoolConfig, setApiPoolConfig] = useState<ApiPoolConfig>({ isEnabled: false });
     const [apiPoolKeys, setApiPoolKeys] = useState<ApiPoolKey[]>([]);
 
+    // State for documentation page visibility
+    const [showDocs, setShowDocs] = useState(false);
 
-    // Fetch user's saved API config on login & check for admin status
+
+    const refreshUserProfile = useCallback(async (uid: string) => {
+        const userProfile = await getUserProfile(uid);
+        const poolConfig = await getApiPoolConfig();
+        setApiPoolConfig(poolConfig);
+
+        const newAppUser = { ...firebaseUser, ...userProfile } as User;
+        
+        if (newAppUser.email === 'admin@gmail.com') {
+            newAppUser.isAdmin = true;
+            const poolKeys = await getApiPoolKeys();
+            setApiPoolKeys(poolKeys);
+        } else {
+            newAppUser.isAdmin = false;
+            if(poolConfig.isEnabled) {
+                const poolKeys = await getApiPoolKeys();
+                setApiPoolKeys(poolKeys);
+            }
+        }
+        setAppUser(newAppUser);
+    }, [firebaseUser]);
+
+    // Fetch user's custom profile, API config, and admin status on login
     useEffect(() => {
-        const checkAdminStatus = async (uid: string) => {
+        const loadUserData = async (fbUser: firebase.User) => {
+            await ensureUserDocument(fbUser.uid, fbUser.email);
+            const config = await getUserApiConfig(fbUser.uid);
+            setApiConfig(config);
+
+            const userProfile = await getUserProfile(fbUser.uid);
             const poolConfig = await getApiPoolConfig();
             setApiPoolConfig(poolConfig);
-            if (user?.email === 'admin@gmail.com') {
-                setIsAdmin(true);
+
+            const combinedUser = { ...fbUser, ...userProfile } as User;
+
+            // Daily Token Reward Logic
+            const today = new Date().setHours(0, 0, 0, 0);
+            const lastLoginDate = combinedUser.lastLogin?.toDate().setHours(0, 0, 0, 0) || 0;
+
+            if (lastLoginDate < today) {
+                const adminSettings = await getAdminSettings();
+                const reward = adminSettings.dailyTokenReward || 1000000; // Default to 1M
+                const newBalance = (combinedUser.tokenBalance || 0) + reward;
+                await updateUserTokenBalance(fbUser.uid, newBalance, true); // true to update lastLogin
+                combinedUser.tokenBalance = newBalance;
+                console.log(`Granted ${reward} daily tokens.`);
+            }
+
+            if (combinedUser.email === 'admin@gmail.com') {
+                combinedUser.isAdmin = true;
                 const poolKeys = await getApiPoolKeys();
                 setApiPoolKeys(poolKeys);
             } else {
-                setIsAdmin(false);
-                // Non-admins only need pool keys if the pool is enabled
-                if(poolConfig.isEnabled) {
+                combinedUser.isAdmin = false;
+                 if(poolConfig.isEnabled) {
                     const poolKeys = await getApiPoolKeys();
                     setApiPoolKeys(poolKeys);
                 }
             }
+            setAppUser(combinedUser);
         };
 
-        if (user) {
-            ensureUserDocument(user.uid, user.email);
-            getUserApiConfig(user.uid).then(config => {
-                if (config) {
-                    setApiConfig(config);
-                }
-            });
-            checkAdminStatus(user.uid);
+        if (firebaseUser) {
+            loadUserData(firebaseUser);
         } else {
-            setIsAdmin(false);
+            setAppUser(null);
         }
-    }, [user]);
+    }, [firebaseUser]);
     
     const handleApiConfigSave = (newConfig: ApiConfig) => {
         setApiConfig(newConfig);
-        if (user) {
-            saveUserApiConfig(user.uid, newConfig);
+        if (appUser) {
+            saveUserApiConfig(appUser.uid, newConfig);
         }
     };
     
@@ -74,7 +115,7 @@ const App: React.FC = () => {
 
     // This is now the primary function to kick things off from Landing or Dashboard
     const handleStartBuilding = useCallback(async (prompt: string, provider?: AiProvider, model?: string) => {
-        if (!user) {
+        if (!appUser) {
             // If user isn't logged in, save the task and show the login page.
             setInitialGenerationTask({ prompt, provider: provider || 'gemini', model });
             setShowLogin(true);
@@ -90,7 +131,7 @@ const App: React.FC = () => {
             const tempName = prompt.length > 50 ? prompt.substring(0, 47) + '...' : prompt;
             
             // Create a new, empty project in Firestore to get an ID.
-            const newProjectId = await createProject(user.uid, tempName, prompt, projectType, projectProvider, {}, model);
+            const newProjectId = await createProject(appUser.uid, tempName, prompt, projectType, projectProvider, {}, model);
             
             // Set the task for the EditorPage to execute upon loading.
             setInitialGenerationTask({ prompt, provider: projectProvider, model });
@@ -102,14 +143,14 @@ const App: React.FC = () => {
         } finally {
             setIsNavigating(false);
         }
-    }, [user]);
+    }, [appUser]);
 
     // Effect to trigger project creation after login if a prompt is pending
     useEffect(() => {
-        if (user && initialGenerationTask && !selectedProjectId && !isNavigating) {
+        if (appUser && initialGenerationTask && !selectedProjectId && !isNavigating) {
              handleStartBuilding(initialGenerationTask.prompt, initialGenerationTask.provider, initialGenerationTask.model);
         }
-    }, [user, initialGenerationTask, selectedProjectId, isNavigating, handleStartBuilding]);
+    }, [appUser, initialGenerationTask, selectedProjectId, isNavigating, handleStartBuilding]);
 
 
     const handleSelectProject = (projectId: string) => {
@@ -121,21 +162,12 @@ const App: React.FC = () => {
         setInitialGenerationTask(null); // Clear any pending tasks
     };
 
-    const augmentedUser: User | null = useMemo(() => {
-        if (!user) {
-            return null;
-        }
-        // Create a new object that inherits from the original Firebase user object.
-        // This preserves prototype methods (like `updateProfile`) while allowing us
-        // to add custom properties like `isAdmin`.
-        const newAppUser = Object.create(user);
-        newAppUser.isAdmin = isAdmin;
-        return newAppUser;
-    }, [user, isAdmin]);
-
-
     const renderContent = () => {
-        if (loading || isNavigating) {
+        if (showDocs) {
+            return <DocumentationPage onBack={() => setShowDocs(false)} onSignInClick={() => { setShowDocs(false); setShowLogin(true); }} />;
+        }
+        
+        if (loading || (firebaseUser && !appUser) || isNavigating) {
             return (
                 <div className="flex flex-col items-center justify-center h-screen bg-base-100">
                     <Spinner size="lg" />
@@ -144,32 +176,33 @@ const App: React.FC = () => {
             );
         }
         
-        if (augmentedUser) {
+        if (appUser) {
             if (selectedProjectId) {
                 return <EditorPage 
                             projectId={selectedProjectId} 
                             onBackToDashboard={handleBackToDashboard} 
-                            user={augmentedUser} 
+                            user={appUser} 
                             apiConfig={apiConfig} 
                             onApiConfigChange={handleApiConfigSave}
                             initialGenerationTask={initialGenerationTask}
                             onTaskConsumed={handleTaskConsumed}
-                            // FIX: Pass admin state down to the editor page.
                             apiPoolConfig={apiPoolConfig}
                             apiPoolKeys={apiPoolKeys}
+                            refreshUserProfile={() => refreshUserProfile(appUser.uid)}
                         />;
             }
             return <DashboardPage 
-                        user={augmentedUser} 
+                        user={appUser} 
                         onSelectProject={handleSelectProject} 
                         onStartBuilding={handleStartBuilding} 
                         apiConfig={apiConfig} 
                         onApiConfigChange={handleApiConfigSave}
-                        // FIX: Pass admin state down to the dashboard.
                         apiPoolConfig={apiPoolConfig}
                         apiPoolKeys={apiPoolKeys}
                         setApiPoolConfig={setApiPoolConfig}
                         setApiPoolKeys={setApiPoolKeys}
+                        onShowDocs={() => setShowDocs(true)}
+                        refreshUserProfile={() => refreshUserProfile(appUser.uid)}
                     />;
         }
 
@@ -181,7 +214,7 @@ const App: React.FC = () => {
             }} />;
         }
 
-        return <LandingPage onStartBuilding={handleStartBuilding} onSignInClick={() => setShowLogin(true)} />;
+        return <LandingPage onStartBuilding={handleStartBuilding} onSignInClick={() => setShowLogin(true)} onShowDocs={() => setShowDocs(true)} />;
     };
 
     return (

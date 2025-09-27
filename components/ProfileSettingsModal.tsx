@@ -8,9 +8,10 @@ interface ProfileSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: User;
+  onUpdateSuccess?: () => void;
 }
 
-const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({ isOpen, onClose, user }) => {
+const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({ isOpen, onClose, user, onUpdateSuccess }) => {
   const [displayName, setDisplayName] = useState(user.displayName || '');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(user.photoURL);
@@ -34,28 +35,38 @@ const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({ isOpen, onC
   };
 
   const handleSave = async () => {
+    if (!auth.currentUser) {
+        setError("Not authenticated. Please sign in again.");
+        return;
+    }
     setIsSaving(true);
     setError('');
     try {
-      let photoURL = user.photoURL;
+      let photoURL = auth.currentUser.photoURL;
 
       if (photoFile) {
-        const storageRef = storage.ref(`profilePictures/${user.uid}/${photoFile.name}`);
+        const storageRef = storage.ref(`profilePictures/${auth.currentUser.uid}/${photoFile.name}`);
         const uploadTask = await storageRef.put(photoFile);
         photoURL = await uploadTask.ref.getDownloadURL();
       }
 
-      await user.updateProfile({
+      await auth.currentUser.updateProfile({
         displayName,
         photoURL,
       });
       
+      onUpdateSuccess?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update profile.");
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleSignOut = () => {
+    auth.signOut();
+    onClose();
   };
 
   return (
@@ -97,21 +108,29 @@ const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({ isOpen, onC
           />
         </div>
 
-        <div className="flex justify-end space-x-4">
-          <button
-            onClick={onClose}
-            disabled={isSaving}
-            className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="px-4 py-2 bg-primary hover:opacity-90 rounded-md text-white font-semibold transition-colors disabled:bg-primary/50 flex items-center justify-center w-28"
-          >
-            {isSaving ? <Spinner size="sm"/> : 'Save'}
-          </button>
+        <div className="flex justify-between items-center mt-8">
+            <button
+                onClick={handleSignOut}
+                className="text-sm text-red-400 hover:text-red-300 hover:underline transition-colors"
+            >
+                Sign Out
+            </button>
+            <div className="flex space-x-4">
+              <button
+                onClick={onClose}
+                disabled={isSaving}
+                className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-4 py-2 bg-primary hover:opacity-90 rounded-md text-white font-semibold transition-colors disabled:bg-primary/50 flex items-center justify-center w-28"
+              >
+                {isSaving ? <Spinner size="sm"/> : 'Save'}
+              </button>
+            </div>
         </div>
       </div>
     </div>
