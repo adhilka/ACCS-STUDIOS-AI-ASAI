@@ -38,6 +38,7 @@ const BuildModeModal: React.FC<BuildModeModalProps> = ({ isOpen, onClose, onBuil
           </label>
            <textarea
               id="buildPrompt"
+              data-testid="godmode-build-prompt-input"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               className="flex-grow w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-primary resize-none"
@@ -56,6 +57,7 @@ const BuildModeModal: React.FC<BuildModeModalProps> = ({ isOpen, onClose, onBuil
           </button>
           <button
             type="submit"
+            data-testid="godmode-build-submit-button"
             disabled={isLoading || !prompt.trim()}
             className="px-6 py-2 bg-primary hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-primary/50 w-40"
           >

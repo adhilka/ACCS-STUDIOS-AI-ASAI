@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 // FIX: Import ApiPoolConfig and ApiPoolKey to support the new admin key pool feature.
-import { FileNode, ApiConfig, AiProvider, AiPlan, AgentState, AiChatMessage, AiChanges, ApiPoolConfig, ApiPoolKey, Project, User } from "../types";
+import { FileNode, ApiConfig, AiProvider, AiPlan, AgentState, AiChatMessage, AiChanges, ApiPoolConfig, ApiPoolKey, Project, User, AiGodModeAction } from "../types";
 import { deductToken, getUserProfile, logPlatformError } from "./firestoreService";
 
 const MEMORY_FILE_PATH = ".asai/memory.md";
@@ -185,15 +185,27 @@ const parseJsonResponse = <T>(text: string): T => {
             }
         }
 
-        // Strategy 2: Find the largest valid JSON object within the text.
+        // Strategy 2: Find the largest valid JSON object or array within the text.
         const jsonStart = text.indexOf('{');
         const jsonEnd = text.lastIndexOf('}');
+        const arrayStart = text.indexOf('[');
+        const arrayEnd = text.lastIndexOf(']');
+
         if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-            const jsonString = text.substring(jsonStart, jsonEnd + 1);
+             const jsonString = text.substring(jsonStart, jsonEnd + 1);
             try {
                 return JSON.parse(jsonString) as T;
             } catch (e) {
-                console.warn("Found text between '{' and '}', but failed to parse. Trying final method.", e);
+                console.warn("Found text between '{' and '}', but failed to parse. Trying array.", e);
+            }
+        }
+        
+        if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+             const jsonString = text.substring(arrayStart, arrayEnd + 1);
+            try {
+                return JSON.parse(jsonString) as T;
+            } catch (e) {
+                console.warn("Found text between '[' and ']', but failed to parse. Trying final method.", e);
             }
         }
 
@@ -506,6 +518,113 @@ User's Request: "${prompt}"`;
     return callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
 };
 
+export const generateSvgAsset = async (
+    prompt: string,
+    assetType: 'icon' | 'background',
+    project: Project,
+    apiConfig: ApiConfig,
+    userId: string,
+    apiPoolConfig?: ApiPoolConfig,
+    apiPoolKeys?: ApiPoolKey[]
+): Promise<string> => {
+
+    let instruction: string;
+    if (assetType === 'icon') {
+        instruction = `You are an expert SVG designer. Your task is to generate raw SVG code based on a user's prompt.
+**CRITICAL INSTRUCTIONS:**
+1.  Your response MUST BE ONLY the raw SVG code. It must start with "<svg" and end with "</svg>". Do not include any text, explanations, or markdown formatting (like \`\`\`xml).
+2.  The SVG MUST be modern, clean, and minimalist.
+3.  The SVG MUST use a \`viewBox="0 0 100 100"\` (or similar square aspect ratio).
+4.  Use \`currentColor\` for fill or stroke properties where appropriate, so the icon can be easily styled with CSS.
+5.  Do not include any \`<style>\` tags or class attributes. Use inline attributes for styling.
+6.  Ensure the SVG is a single, self-contained file. Do not use external references.`;
+    } else { // background
+        instruction = `You are an expert SVG designer specializing in backgrounds and patterns. Your task is to generate raw SVG code based on a user's prompt.
+**CRITICAL INSTRUCTIONS:**
+1.  Your response MUST BE ONLY the raw SVG code. It must start with "<svg" and end with "</svg>". Do not include any text, explanations, or markdown formatting.
+2.  The design should be abstract, subtle, and suitable as a website background. Avoid complex, distracting imagery.
+3.  The SVG should be tileable if possible. Consider using \`<defs>\` and \`<pattern>\` to create seamless patterns.
+4.  Use a large \`viewBox\` that can scale, for example \`viewBox="0 0 800 600"\`.
+5.  Do not use any external references or fonts.`;
+    }
+
+    const fullPrompt = `${instruction}\n\n**User's Request:** "${prompt}"`;
+
+    // This feature is best suited for Gemini, so we'll prefer it.
+    const provider: AiProvider = 'gemini';
+    
+    return callAiModel(fullPrompt, provider, apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id);
+};
+
+export const godModePlanner = async (
+    objective: string,
+    currentFiles: FileNode[],
+    uiContext: string,
+    project: Project,
+    apiConfig: ApiConfig,
+    userId: string,
+    apiPoolConfig?: ApiPoolConfig,
+    apiPoolKeys?: ApiPoolKey[]
+): Promise<AiGodModeAction[]> => {
+    const projectJsonString = JSON.stringify(fileSystemToJSON(currentFiles), null, 2);
+
+    // Step 1: Gemini (Orchestrator) creates the high-level plan.
+    const planPrompt = `You are "God Mode" Orchestrator AI (Gemini), an autonomous agent controlling a web dev app.
+Your task is to break down the user's objective into a sequence of precise UI/file actions.
+You MUST respond with a valid JSON array of action objects. Do not add any other text.
+You have two specialist assistants: a Speed Coder (Groq) and a Flexible Analyst (OpenRouter).
+For 'MODIFY_FILES' actions, you will state the goal in the 'reasoning' and leave the payload empty. A specialist will write the code.
+
+**Action Schema:**
+- \`CLICK_ELEMENT\`: To click a button/tab. Requires a \`selector\`.
+- \`TYPE_IN_INPUT\`: To type text. Requires a \`selector\` and a string \`payload\`.
+- \`MODIFY_FILES\`: To change files. Requires an empty \`payload\`.
+- \`ASK_USER\`: To ask for clarification. Requires a question string as \`payload\`.
+- \`FINISH\`: To signify completion. This MUST be the last action.
+
+For each action, you MUST provide a "reasoning" string explaining your thought process for that specific step.
+
+**User's Objective:** "${objective}"
+**Current Project Files:** \`\`\`json\n${projectJsonString}\n\`\`\`
+**Interactable UI Elements:** \`\`\`json\n${uiContext}\n\`\`\`
+
+Generate the JSON plan now.`;
+
+    const geminiResponseText = await callAiModel(planPrompt, 'gemini', apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id);
+    const initialPlan = parseJsonResponse<AiGodModeAction[]>(geminiResponseText);
+
+    const finalPlan: AiGodModeAction[] = [];
+
+    for (const action of initialPlan) {
+        if (action.type === 'MODIFY_FILES') {
+            // Step 2: Groq (Code Generator) writes the code for the file modification step.
+            const groqPrompt = `You are a high-speed code generation AI (Groq). Based on the request and current project files, generate a JSON object with file changes ({create?:..., update?:..., delete?:...}). Your response must be ONLY the raw JSON object. Request: "${action.reasoning}"\n\nProject Files: ${projectJsonString}`;
+            const groqModel = 'llama3-8b-8192';
+            const groqResponseText = await callAiModel(groqPrompt, 'groq', apiConfig, groqModel, userId, apiPoolConfig, apiPoolKeys, project.id);
+            const groqChanges = parseJsonResponse<AiChanges>(groqResponseText);
+
+            // Step 3: OpenRouter (Analyst) reviews the generated code.
+            const openRouterPrompt = `You are a code analysis AI (OpenRouter). A plan was made: "${action.reasoning}". Code was generated: ${JSON.stringify(groqChanges)}. Is the code correct and complete for the request? Respond with a single, brief sentence of analysis starting with "Analysis:". For example: "Analysis: The code correctly creates the component." or "Analysis: The generated code is missing the necessary import statement."`;
+            const openRouterModel = 'mistralai/mistral-7b-instruct';
+            const openRouterResponseText = await callAiModel(openRouterPrompt, 'openrouter', apiConfig, openRouterModel, userId, apiPoolConfig, apiPoolKeys, project.id);
+
+            // Step 4: Combine results into the final action.
+            const refinedAction: AiGodModeAction = {
+                ...action,
+                payload: groqChanges,
+                reasoning: `[${openRouterResponseText.trim()}] ${action.reasoning}`
+            };
+            finalPlan.push(refinedAction);
+        } else {
+            // Push non-MODIFY_FILES actions directly to the final plan.
+            finalPlan.push(action);
+        }
+    }
+
+    return finalPlan;
+};
+
+
 // --- Agent for Initial Project Generation ---
 // FIX: Updated function signature to accept and pass userId and API pool parameters.
 export const runInitialProjectAgent = async (
@@ -519,23 +638,43 @@ export const runInitialProjectAgent = async (
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<{ projectName: string; changes: AiChanges }> => {
-    onAgentMessage({ text: "Okay, I'm starting on your request. First, I'll create a plan...", isLoading: true });
+    onAgentMessage({ 
+        text: "Okay, I'm starting on your request. First, I'll create a plan...", 
+        isLoading: false,
+        agentState: 'planning',
+        thoughts: `The user wants me to build a new ${projectType}. I will analyze their request to design a complete file structure with all necessary code, and then I'll generate the project files.`
+    });
     
     // This call can take time. The user sees the "planning" message.
     const { projectName, files } = await generateInitialProject(prompt, projectType, provider, model, apiConfig, userId, apiPoolConfig, apiPoolKeys);
 
-    onAgentMessage({ text: `Plan complete for project "${projectName}". I will now generate the files.`, isLoading: false });
+    onAgentMessage({ 
+        text: `Plan complete for project "${projectName}". I will now generate the files.`, 
+        isLoading: false,
+        agentState: 'executing',
+        thoughts: "The plan and initial file structure have been generated successfully. Now I'll create each file one by one."
+    });
 
     const changes: AiChanges = { create: {} };
     const filePaths = Object.keys(files);
 
     for (const path of filePaths) {
-        onAgentMessage({ text: `Creating file: \`${path}\``, isLoading: true });
+        onAgentMessage({ 
+            text: `Creating file: \`${path}\``, 
+            isLoading: false,
+            agentState: 'executing',
+            currentTask: `Generate content for ${path}`
+        });
         await new Promise(resolve => setTimeout(resolve, 200)); // Small delay for UX
         changes.create![path] = files[path];
     }
     
-    onAgentMessage({ text: `All files have been generated for "${projectName}". Project is ready!`, isLoading: false });
+    onAgentMessage({ 
+        text: `All files have been generated for "${projectName}". Project is ready!`, 
+        isLoading: false,
+        agentState: 'finished',
+        thoughts: "All files have been created in memory. The project is now ready for the user to view and interact with."
+    });
 
     return { projectName, changes };
 }

@@ -14,6 +14,7 @@ interface ProjectSettingsModalProps {
   members: ChatMessageSenderInfo[];
   onRemoveMember: (memberUid: string) => Promise<void>;
   onCreateInvite: (email: string) => Promise<string>;
+  onUpdateSuccess?: () => void;
 }
 
 const modelOptions = {
@@ -31,7 +32,7 @@ const modelOptions = {
     ]
 };
 
-const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onClose, onSave, project, isSaving, members, onRemoveMember, onCreateInvite }) => {
+const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onClose, onSave, project, isSaving, members, onRemoveMember, onCreateInvite, onUpdateSuccess }) => {
   const { user } = useAuth();
   const [name, setName] = useState(project.name);
   const [prompt, setPrompt] = useState(project.prompt || '');
@@ -127,6 +128,7 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
                           <input
                             type="text"
                             id="projectName"
+                            data-testid="godmode-project-name-input"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                             className="w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
@@ -185,6 +187,7 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
                       </label>
                        <textarea
                           id="projectPrompt"
+                          data-testid="godmode-project-prompt-input"
                           value={prompt}
                           onChange={(e) => setPrompt(e.target.value)}
                           rows={5}
@@ -270,6 +273,7 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
           </button>
           <button
             onClick={handleSave}
+            data-testid="godmode-save-settings-button"
             disabled={isSaving || activeTab !== 'general'}
             className="px-4 py-2 bg-primary hover:opacity-90 rounded-md text-white font-semibold transition-colors disabled:bg-primary/50 disabled:cursor-not-allowed"
           >
@@ -278,7 +282,7 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
         </div>
       </div>
     </div>
-    {user && <CollaborationSettingsModal isOpen={isCollabModalOpen} onClose={() => setIsCollabModalOpen(false)} user={user} />}
+    {user && <CollaborationSettingsModal isOpen={isCollabModalOpen} onClose={() => setIsCollabModalOpen(false)} user={user} onUpdateSuccess={onUpdateSuccess} />}
     </>
   );
 };

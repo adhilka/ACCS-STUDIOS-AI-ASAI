@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import FileExplorer from './FileExplorer';
-import { CodeIcon, ChatBubbleIcon, SaveIcon } from './icons';
-import { FileNode, AiChatMessage, User, Project, ApiConfig, ApiPoolConfig, ApiPoolKey, ChatMessageSenderInfo } from '../types';
-// FIX: Imported Spinner component to resolve reference error.
+import { CodeIcon, ChatBubbleIcon, SaveIcon, TrashIcon } from './icons';
+import { FileNode, AiChatMessage, User, Project, ApiConfig, ApiPoolConfig, ApiPoolKey, ChatMessageSenderInfo, Snapshot } from '../types';
 import Spinner from './ui/Spinner';
+import ChatInterface from './ChatInterface';
 
 interface SidebarProps {
   files: FileNode[];
@@ -12,22 +12,50 @@ interface SidebarProps {
   onFileDelete: (id:string) => void;
   onFileAdd: (parentId: string, type: 'file' | 'folder') => void;
   onFileUpload: (file: File, parentPath: string) => void;
-  activeTab: 'files' | 'snapshots';
-  onTabChange: (tab: 'files' | 'snapshots') => void;
+  activeTab: 'files' | 'chat' | 'snapshots';
+  onTabChange: (tab: 'files' | 'chat' | 'snapshots') => void;
   isGenerating: boolean;
   onContextMenuRequest: (path: string, x: number, y: number) => void;
   isCollaborationEnabled: boolean;
+  
+  // Chat Props
+  messages: AiChatMessage[];
+  onSendMessage: (message: string, mode: 'build' | 'ask' | 'general') => void;
+  isLoading: boolean;
+  onApprovePlan: (messageId: string) => void;
+  onRejectPlan: (messageId: string) => void;
+  projectMembers: ChatMessageSenderInfo[];
+  currentUser: User;
+  isOwner: boolean;
+  project: Project | null;
+  apiConfig: ApiConfig;
+  apiPoolConfig: ApiPoolConfig;
+  apiPoolKeys: ApiPoolKey[];
+  currentUserId: string;
+  onSendRichMessage: (messageData: Partial<Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>>) => void;
+  onDeleteMessage: (messageId: string) => void;
+  onOpenFileFromPin: (filePath: string) => void;
+
+  // Snapshot Props
+  snapshots: Snapshot[];
+  onCreateSnapshot: () => void;
+  onDeleteSnapshot: (snapshotId: string) => void;
 }
 
-type Tab = 'files' | 'snapshots';
+type Tab = 'files' | 'chat' | 'snapshots';
 
-const SnapshotsPanel: React.FC<{ isCollaborationEnabled: boolean }> = ({ isCollaborationEnabled }) => {
-    // This is a placeholder for the full snapshot UI
+const SnapshotsPanel: React.FC<{
+  isCollaborationEnabled: boolean;
+  snapshots: Snapshot[];
+  onCreateSnapshot: () => void;
+  onDeleteSnapshot: (snapshotId: string) => void;
+  isOwner: boolean;
+}> = ({ isCollaborationEnabled, snapshots, onCreateSnapshot, onDeleteSnapshot, isOwner }) => {
     return (
-        <div className="p-4 text-sm text-neutral h-full flex flex-col">
-            <h3 className="text-sm font-semibold tracking-wider uppercase text-base-content mb-4 border-b border-base-300 pb-2">Project Snapshots</h3>
+        <div className="p-2 text-sm text-neutral h-full flex flex-col">
+            <h3 className="text-sm font-semibold tracking-wider uppercase text-base-content mb-2 p-2 border-b border-base-300">Project Snapshots</h3>
             {!isCollaborationEnabled ? (
-                <div className="flex-grow flex items-center justify-center text-center">
+                <div className="flex-grow flex items-center justify-center text-center p-4">
                     <div>
                         <SaveIcon className="w-12 h-12 text-base-300 mx-auto mb-4" />
                         <h4 className="font-semibold text-base-content">Feature Disabled</h4>
@@ -35,14 +63,41 @@ const SnapshotsPanel: React.FC<{ isCollaborationEnabled: boolean }> = ({ isColla
                     </div>
                 </div>
             ) : (
-                <div className="flex-grow">
-                    <button className="w-full text-center py-2 bg-primary hover:opacity-90 text-white font-semibold rounded-md transition-colors text-sm">
-                        Create New Snapshot
-                    </button>
-                    <div className="mt-4 text-center">
-                        <p>Your snapshots will appear here.</p>
-                         {/* Snapshot list would be rendered here */}
-                    </div>
+                <div className="flex-grow flex flex-col">
+                    {isOwner && (
+                        <div className="px-2 pb-2 mb-2 border-b border-base-300">
+                             <button data-testid="godmode-create-snapshot-button" onClick={onCreateSnapshot} className="w-full text-center py-2 bg-primary hover:opacity-90 text-white font-semibold rounded-md transition-colors text-sm">
+                                Create New Snapshot
+                            </button>
+                        </div>
+                    )}
+                    {snapshots.length === 0 ? (
+                        <div className="flex-grow flex items-center justify-center text-center text-neutral p-4">
+                            No snapshots created yet.
+                        </div>
+                    ) : (
+                        <div className="flex-grow overflow-y-auto pr-1">
+                            {snapshots.map(snap => (
+                                <div key={snap.id} className="p-2 rounded-md hover:bg-base-300/50 group">
+                                    <div className="flex justify-between items-start">
+                                        <p className="text-xs text-base-content font-semibold flex-grow pr-2">{snap.triggeringPrompt}</p>
+                                        {isOwner && (
+                                            <button 
+                                                onClick={() => onDeleteSnapshot(snap.id)}
+                                                className="p-1 rounded-full hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                title="Delete snapshot"
+                                            >
+                                                <TrashIcon className="w-4 h-4 text-red-400" />
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-neutral/80 mt-1">
+                                        {snap.createdAt?.toDate().toLocaleString()}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -51,7 +106,7 @@ const SnapshotsPanel: React.FC<{ isCollaborationEnabled: boolean }> = ({ isColla
 
 
 const Sidebar: React.FC<SidebarProps> = (props) => {
-  const { activeTab, onTabChange } = props;
+  const { activeTab, onTabChange, isCollaborationEnabled, snapshots, onCreateSnapshot, onDeleteSnapshot, isOwner } = props;
 
   const tabClasses = (tab: Tab) => `flex-1 py-2 px-4 text-sm font-medium text-center cursor-pointer flex items-center justify-center gap-2 border-b-2 transition-colors ${
     activeTab === tab 
@@ -62,10 +117,13 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
   return (
     <div className="bg-base-200 flex flex-col h-full">
       <div className="flex border-b border-base-300">
-        <button onClick={() => onTabChange('files')} className={tabClasses('files')}>
+        <button data-testid="godmode-sidebar-files-tab" onClick={() => onTabChange('files')} className={tabClasses('files')}>
           <CodeIcon /> Files
         </button>
-        <button onClick={() => onTabChange('snapshots')} className={tabClasses('snapshots')}>
+        <button data-testid="godmode-sidebar-chat-tab" onClick={() => onTabChange('chat')} className={tabClasses('chat')}>
+          <ChatBubbleIcon /> {isCollaborationEnabled ? "Team Chat" : "AI Chat"}
+        </button>
+        <button data-testid="godmode-sidebar-snapshots-tab" onClick={() => onTabChange('snapshots')} className={tabClasses('snapshots')}>
           <SaveIcon /> Snapshots
         </button>
       </div>
@@ -89,8 +147,35 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
                 />
             )
         )}
+        {activeTab === 'chat' && (
+             <ChatInterface 
+                messages={props.messages}
+                onSendMessage={props.onSendMessage}
+                isLoading={props.isLoading}
+                onApprovePlan={props.onApprovePlan}
+                onRejectPlan={props.onRejectPlan}
+                projectMembers={props.projectMembers}
+                currentUser={props.currentUser}
+                isOwner={props.isOwner}
+                files={props.files}
+                project={props.project}
+                apiConfig={props.apiConfig}
+                apiPoolConfig={props.apiPoolConfig}
+                apiPoolKeys={props.apiPoolKeys}
+                currentUserId={props.currentUserId}
+                onSendRichMessage={props.onSendRichMessage}
+                onDeleteMessage={props.onDeleteMessage}
+                onOpenFileFromPin={props.onOpenFileFromPin}
+            />
+        )}
         {activeTab === 'snapshots' && (
-            <SnapshotsPanel isCollaborationEnabled={props.isCollaborationEnabled} />
+             <SnapshotsPanel 
+                isCollaborationEnabled={isCollaborationEnabled}
+                snapshots={snapshots}
+                onCreateSnapshot={onCreateSnapshot}
+                onDeleteSnapshot={onDeleteSnapshot}
+                isOwner={isOwner}
+            />
         )}
       </div>
     </div>

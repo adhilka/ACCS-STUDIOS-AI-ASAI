@@ -25,7 +25,7 @@
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lz-string@1.4.4/libs/lz-string.min.js"></script>
+    <script src="https://unpkg.com/lz-string@1.5.0/libs/lz-string.min.js"></script>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -33,14 +33,14 @@
 
     <style id="brand-styles">
       :root {
-        --color-primary: #60a5fa;      /* blue-400 */
-        --color-secondary: #c084fc;   /* purple-400 */
-        --color-accent: #22d3ee;      /* cyan-400 */
-        --color-neutral: #94a3b8;     /* slate-400 */
-        --color-base-content: #e2e8f0;/* slate-200 */
-        --color-base-100: #020617;    /* slate-950 */
-        --color-base-200: #0f172a;    /* slate-900 */
-        --color-base-300: #1e293b;    /* slate-800 */
+        --color-primary: #737373;      /* neutral-500 */
+        --color-secondary: #525252;   /* neutral-600 */
+        --color-accent: #a3a3a3;      /* neutral-400 */
+        --color-neutral: #a3a3a3;     /* neutral-400 */
+        --color-base-content: #e5e5e5;/* neutral-200 */
+        --color-base-100: #171717;    /* neutral-900 */
+        --color-base-200: #262626;    /* neutral-800 */
+        --color-base-300: #404040;    /* neutral-700 */
         
         --image-background: none;
       }
@@ -76,7 +76,7 @@
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #556278; /* Slightly lighter slate */
+        background: #525252; /* neutral-600 */
       }
       
       /* New animations */
@@ -101,7 +101,7 @@
         left: -100%;
         width: 100%;
         height: 100%;
-        background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+        background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.1), transparent);
         transition: all 0.6s;
       }
       .btn-shine:hover::before {

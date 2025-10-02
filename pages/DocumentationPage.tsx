@@ -113,7 +113,7 @@ const DocumentationPage: React.FC<DocumentationPageProps> = ({ onBack, onSignInC
                     </Section>
 
                     <Section id="collaboration" title="Collaboration & Chat">
-                        <p>ASAI is built from the ground up for teamwork. Go beyond simple code generation and create in a fully collaborative environment, powered by your own secure backend.</p>
+                        <p>ASAI is built from the ground up for teamwork. Go beyond solo code generation and create in a fully collaborative environment, powered by your own secure backend.</p>
                         
                         <h3><UsersIcon className="w-5 h-5 inline-block mr-2"/>Enabling Real-Time Collaboration</h3>
                         <p>To unlock true real-time features, the project owner must connect a personal Firebase project. This self-hosting model ensures your data remains private and under your control. Once configured in <strong>Project Settings</strong>, this enables:</p>

@@ -1,6 +1,9 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { FileNode } from '../types';
-import { FolderIcon, FileIcon, DeleteIcon, AddFileIcon, AddFolderIcon, SearchIcon, UploadIcon } from './icons';
+import { 
+    FolderIcon, FileIcon, DeleteIcon, AddFileIcon, AddFolderIcon, SearchIcon, UploadIcon,
+    ChevronRightIcon, ChevronDownIcon, ReactIcon, HtmlIcon, CssIcon, JsIcon, TsIcon, JsonIcon, SvgIcon, MarkdownIcon 
+} from './icons';
 
 interface FileExplorerProps {
   files: FileNode[];
@@ -19,19 +22,42 @@ interface TreeNode {
   children?: TreeNode[];
 }
 
+const getFileIcon = (fileName: string) => {
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    switch (extension) {
+        case 'tsx':
+        case 'jsx':
+            return <ReactIcon className="w-5 h-5 text-cyan-400 shrink-0" />;
+        case 'js':
+            return <JsIcon className="w-5 h-5 text-yellow-400 shrink-0" />;
+        case 'ts':
+            return <TsIcon className="w-5 h-5 text-blue-400 shrink-0" />;
+        case 'css':
+            return <CssIcon className="w-5 h-5 text-sky-500 shrink-0" />;
+        case 'html':
+            return <HtmlIcon className="w-5 h-5 text-orange-500 shrink-0" />;
+        case 'json':
+            return <JsonIcon className="w-5 h-5 text-green-400 shrink-0" />;
+        case 'svg':
+            return <SvgIcon className="w-5 h-5 text-pink-400 shrink-0" />;
+        case 'md':
+            return <MarkdownIcon className="w-5 h-5 text-gray-400 shrink-0" />;
+        default:
+            return <FileIcon className="w-5 h-5 text-neutral shrink-0" />;
+    }
+};
+
 const buildTree = (files: FileNode[]): TreeNode[] => {
     const tree: TreeNode[] = [];
     const nodeMap = new Map<string, TreeNode>();
 
-    // First, create explicit nodes for all files and folders from the flat list
     files.forEach(file => {
         nodeMap.set(file.path, {
-            ...file, // includes name, path, type
+            ...file,
             children: file.type === 'folder' ? [] : undefined,
         });
     });
 
-    // Ensure all parent directories exist implicitly
     files.forEach(file => {
         const pathParts = file.path.split('/');
         let currentPath = '';
@@ -49,7 +75,6 @@ const buildTree = (files: FileNode[]): TreeNode[] => {
         }
     });
 
-    // Link children to their parents
     nodeMap.forEach(node => {
         const parentPath = node.path.substring(0, node.path.lastIndexOf('/'));
         const parent = nodeMap.get(parentPath);
@@ -60,7 +85,6 @@ const buildTree = (files: FileNode[]): TreeNode[] => {
         }
     });
     
-    // Recursive sort function
     const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
         nodes.forEach(node => {
             if (node.children) {
@@ -82,8 +106,18 @@ const TreeNodeComponent: React.FC<{
     selectedFilePath: string | null;
     onFileSelect: (path: string) => void;
     onContextMenuRequest: (path: string, x: number, y: number) => void;
-}> = ({ node, level, selectedFilePath, onFileSelect, onContextMenuRequest }) => {
+    expandedFolders: Set<string>;
+    onFolderToggle: (path: string) => void;
+}> = ({ node, level, selectedFilePath, onFileSelect, onContextMenuRequest, expandedFolders, onFolderToggle }) => {
   const isSelected = selectedFilePath === node.path;
+  const isExpanded = expandedFolders.has(node.path);
+
+  const handleNodeClick = () => {
+    if (node.type === 'folder') {
+        onFolderToggle(node.path);
+    }
+    onFileSelect(node.path);
+  };
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -94,7 +128,7 @@ const TreeNodeComponent: React.FC<{
   return (
     <div>
       <div
-        onClick={() => onFileSelect(node.path)}
+        onClick={handleNodeClick}
         onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${level * 1.25}rem` }}
         className={`flex items-center justify-between pr-2 py-1.5 cursor-pointer rounded-md text-sm group ${
@@ -102,11 +136,16 @@ const TreeNodeComponent: React.FC<{
         }`}
       >
         <div className="flex items-center space-x-2 truncate">
-          {node.type === 'folder' ? <FolderIcon className="w-5 h-5 text-sky-500" /> : <FileIcon className="w-5 h-5 text-neutral" />}
+          {node.type === 'folder' ? (
+              <>
+                  {isExpanded ? <ChevronDownIcon className="w-4 h-4 shrink-0" /> : <ChevronRightIcon className="w-4 h-4 shrink-0" />}
+                  <FolderIcon className="w-5 h-5 text-sky-500 shrink-0" />
+              </>
+          ) : getFileIcon(node.name)}
           <span className="truncate">{node.name}</span>
         </div>
       </div>
-      {node.type === 'folder' && node.children && (
+      {node.type === 'folder' && isExpanded && node.children && (
         <div>
           {node.children.map((child) => (
                 <TreeNodeComponent
@@ -116,6 +155,8 @@ const TreeNodeComponent: React.FC<{
                     selectedFilePath={selectedFilePath}
                     onFileSelect={onFileSelect}
                     onContextMenuRequest={onContextMenuRequest}
+                    expandedFolders={expandedFolders}
+                    onFolderToggle={onFolderToggle}
                 />
           ))}
         </div>
@@ -127,7 +168,20 @@ const TreeNodeComponent: React.FC<{
 
 const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, onFileSelect, onFileDelete, onFileAdd, onFileUpload, onContextMenuRequest }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(['src']));
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFolderToggle = (path: string) => {
+    setExpandedFolders(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(path)) {
+            newSet.delete(path);
+        } else {
+            newSet.add(path);
+        }
+        return newSet;
+    });
+  };
 
   const handleFileSelectForUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -136,7 +190,6 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, on
             ? selectedFilePath 
             : (selectedFilePath?.substring(0, selectedFilePath.lastIndexOf('/')) || '');
         onFileUpload(file, parentPath);
-        // Reset file input to allow uploading the same file again
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
@@ -151,9 +204,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, on
 
     files.forEach(file => {
       if (file.name.toLowerCase().includes(lowercasedQuery)) {
-        // Add the file itself
         matchingPaths.add(file.path);
-        // Add all its parent directories
         const pathParts = file.path.split('/');
         let currentPath = '';
         for (let i = 0; i < pathParts.length - 1; i++) {
@@ -177,7 +228,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, on
         ref={fileInputRef}
         onChange={handleFileSelectForUpload}
         className="hidden"
-        accept="image/*,video/*"
+        accept="image/*,video/*,.json,.txt,.md,.html,.css,.js,.ts,.tsx"
       />
       <div className="flex items-center justify-between p-2 mb-2 border-b border-base-300">
         <h3 className="text-sm font-semibold tracking-wider uppercase">Project Files</h3>
@@ -210,6 +261,8 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, on
             selectedFilePath={selectedFilePath}
             onFileSelect={onFileSelect}
             onContextMenuRequest={onContextMenuRequest}
+            expandedFolders={expandedFolders}
+            onFolderToggle={handleFolderToggle}
           />
         )) : (
             <div className="text-center text-neutral text-sm mt-4 px-2">

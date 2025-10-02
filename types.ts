@@ -226,3 +226,11 @@ export interface Invite {
     inviteeEmail: string;
     createdAt: firebase.firestore.Timestamp;
 }
+
+// --- Types for AI God Mode ---
+export type AiGodModeAction = {
+    type: 'CLICK_ELEMENT' | 'TYPE_IN_INPUT' | 'MODIFY_FILES' | 'ASK_USER' | 'FINISH';
+    selector?: string; // For CLICK_ELEMENT and TYPE_IN_INPUT
+    payload?: string | AiChanges; // Text for TYPE_IN_INPUT, changes for MODIFY_FILES, question for ASK_USER
+    reasoning: string; // AI's thought process for this specific action
+};

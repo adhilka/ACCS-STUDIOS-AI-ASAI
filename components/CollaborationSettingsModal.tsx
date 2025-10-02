@@ -8,9 +8,10 @@ interface CollaborationSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: User;
+  onUpdateSuccess?: () => void;
 }
 
-const CollaborationSettingsModal: React.FC<CollaborationSettingsModalProps> = ({ isOpen, onClose, user }) => {
+const CollaborationSettingsModal: React.FC<CollaborationSettingsModalProps> = ({ isOpen, onClose, user, onUpdateSuccess }) => {
   // FIX: Removed databaseURL from initial state to align with Firestore-only setup.
   const [config, setConfig] = useState<CustomFirebaseConfig>({
     enabled: false,
@@ -47,7 +48,8 @@ const CollaborationSettingsModal: React.FC<CollaborationSettingsModalProps> = ({
     setIsSaving(true);
     try {
       await saveCustomFirebaseConfig(user.uid, config);
-      alert('Settings saved successfully! Refresh the editor to see changes.');
+      alert('Settings saved successfully!');
+      onUpdateSuccess?.(); // Trigger profile refresh
       onClose();
     } catch (error) {
       alert(`Failed to save settings: ${error instanceof Error ? error.message : 'Unknown error'}`);

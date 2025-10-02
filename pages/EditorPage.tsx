@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FileNode, AiChatMessage, ApiConfig, User, Project, AgentState, AiChanges, AiProvider, AiPlan, ApiPoolConfig, ApiPoolKey, ConsoleMessage, TerminalOutput, ChatMessageSenderInfo } from '../types';
+import { FileNode, AiChatMessage, ApiConfig, User, Project, AgentState, AiChanges, AiProvider, AiPlan, ApiPoolConfig, ApiPoolKey, ConsoleMessage, TerminalOutput, ChatMessageSenderInfo, Snapshot, AiGodModeAction } from '../types';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import CodeEditor from '../components/CodeEditor';
@@ -9,16 +9,17 @@ import ProjectSettingsModal from '../components/ProjectSettingsModal';
 import BuildModeModal from '../components/BuildModeModal';
 import AutonomousModeModal from '../components/AutonomousModeModal';
 import Spinner from '../components/ui/Spinner';
-import { generateModificationPlan, executeModificationPlan, analyzeCode, runAutonomousAgent, proposeFixes, runInitialProjectAgent, answerProjectQuestion, summarizeChangesForMemory, askGeneralQuestion } from '../services/aiService';
+import { generateModificationPlan, executeModificationPlan, analyzeCode, runAutonomousAgent, proposeFixes, runInitialProjectAgent, answerProjectQuestion, summarizeChangesForMemory, askGeneralQuestion, generateSvgAsset, godModePlanner } from '../services/aiService';
 import { 
     addChatMessage, addFileOrFolder, deleteFileByPath, applyAiChanges, 
     getProjectDetails, updateProjectDetails, updateChatMessage, deleteProject, 
     copyProject, clearChatHistory, createShareKey, renameOrMovePath, 
     getUserProfile, updateFileContent, streamProjectDetails, streamProjectFiles, 
-    streamChatHistory, getUsersProfiles, deleteChatMessage, getProjectFiles, getChatHistory, removeProjectMember, createInvite
+    streamChatHistory, getUsersProfiles, deleteChatMessage, getProjectFiles, getChatHistory, removeProjectMember, createInvite,
+    streamSnapshots, createSnapshot, deleteSnapshot
 } from '../services/firestoreService';
 import { firestore, getSecondaryFirebaseApp } from '../services/firebase';
-import { CodeIcon, PlayIcon, CommandLineIcon, ChevronRightIcon, ExternalLinkIcon, PaperClipIcon, PencilIcon, ArrowRightIcon, DeleteIcon, TrashIcon } from '../components/icons';
+import { CodeIcon, PlayIcon, CommandLineIcon, ChevronRightIcon, ExternalLinkIcon, PaperClipIcon, PencilIcon, ArrowRightIcon, DeleteIcon, TrashIcon, DocumentDuplicateIcon } from '../components/icons';
 import DebugRefactorModal from '../components/DebugRefactorModal';
 import ProfileSettingsModal from '../components/ProfileSettingsModal';
 import ShareProjectModal from '../components/ShareProjectModal';
@@ -29,6 +30,10 @@ import DeploymentModal from '../components/DeploymentModal';
 import ChatInterface from '../components/ChatInterface';
 import MobileNavBar from '../components/MobileNavBar';
 import FileExplorer from '../components/FileExplorer';
+import SvgDesignModal from '../components/SvgDesignModal';
+// FIX: Import GodModeModal to be used in the component.
+import GodModeModal from '../components/GodModeModal';
+import GodModeStatus from '../components/GodModeStatus';
 
 declare const JSZip: any;
 declare const LZString: any;
@@ -77,6 +82,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
     const [isDeploymentModalOpen, setIsDeploymentModalOpen] = useState(false);
+    const [isSvgDesignModalOpen, setIsSvgDesignModalOpen] = useState(false);
+    const [isGodModeModalOpen, setIsGodModeModalOpen] = useState(false);
     const [isDeploying, setIsDeploying] = useState(false);
     const [isFixing, setIsFixing] = useState(false);
     const [proposedFixes, setProposedFixes] = useState<AiChanges | null>(null);
@@ -87,7 +94,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const [consoleMessages, setConsoleMessages] = useState<ConsoleMessage[]>([]);
     const [agentState, setAgentState] = useState<AgentState>({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] });
     const [isGeneratingInitialProject, setIsGeneratingInitialProject] = useState(false);
-    const [sidebarTab, setSidebarTab] = useState<'files' | 'snapshots'>('files');
+    const [sidebarTab, setSidebarTab] = useState<'files' | 'chat' | 'snapshots'>('files');
     const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
     const [savingFile, setSavingFile] = useState<string | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string } | null>(null);
@@ -95,7 +102,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const [dbInstance, setDbInstance] = useState(firestore);
     const [projectMembers, setProjectMembers] = useState<ChatMessageSenderInfo[]>([]);
     const [migrationStatus, setMigrationStatus] = useState<string>('');
+    const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
     
+    const [godModeActionQueue, setGodModeActionQueue] = useState<AiGodModeAction[]>([]);
+    const [currentGodModeAction, setCurrentGodModeAction] = useState<AiGodModeAction | null>(null);
+    const [isGodModeActive, setIsGodModeActive] = useState(false);
+
     const isOwner = user?.uid === project?.ownerId;
     const isMobile = useMediaQuery('(max-width: 1023px)');
     const [mobileView, setMobileView] = useState<MobileView>('files');
@@ -103,10 +115,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const [sidebarWidth, setSidebarWidth] = useState(() => {
         const savedWidth = localStorage.getItem('sidebarWidth');
         return savedWidth ? parseInt(savedWidth, 10) : 320;
-    });
-     const [chatPanelWidth, setChatPanelWidth] = useState(() => {
-        const savedWidth = localStorage.getItem('chatPanelWidth');
-        return savedWidth ? parseInt(savedWidth, 10) : 480;
     });
     const [bottomPanelHeight, setBottomPanelHeight] = useState(() => {
         const savedHeight = localStorage.getItem('bottomPanelHeight');
@@ -118,7 +126,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     });
 
     const isResizingSidebar = useRef(false);
-    const isResizingChatPanel = useRef(false);
     const isResizingVertical = useRef(false);
     const isResizingMain = useRef(false);
 
@@ -191,7 +198,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         };
     
         setupDbInstance();
-    }, [projectId]);
+    }, [projectId, user]); // Rerun if user object changes (e.g. after profile update)
 
     useEffect(() => {
         // This effect sets up all real-time listeners once the dbInstance is determined.
@@ -206,6 +213,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         const unsubChat = streamChatHistory(projectId, (messages) => {
             setChatMessages(messages);
         }, dbInstance);
+
+        const unsubSnapshots = streamSnapshots(projectId, (snapshots) => {
+            setSnapshots(snapshots);
+        }, dbInstance);
         
         // A small delay helps ensure initial data is processed before hiding the loader.
         const timer = setTimeout(() => setIsLoading(false), 500);
@@ -214,6 +225,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             unsubProject();
             unsubFiles();
             unsubChat();
+            unsubSnapshots();
             clearTimeout(timer);
         };
     }, [projectId, dbInstance]);
@@ -251,8 +263,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             if(isMobile) {
                 setMobileView('chat');
             } else {
-// FIX: The sidebar does not have a 'chat' tab. Switched to 'files' to show the generation progress spinner.
-                setSidebarTab('files');
+                setSidebarTab('chat');
                 setIsPreviewPaneOpen(true);
             }
 
@@ -262,7 +273,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             await addChatMessage(projectId, userMessage, dbInstance);
 
             const onAgentMessage = async (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => {
-                const agentMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'ai', isAgentMessage: false, ...message };
+                const agentMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'ai', isAgentMessage: true, ...message };
                 await addChatMessage(projectId, agentMessage, dbInstance);
             };
 
@@ -351,6 +362,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const handleSendMessage = async (message: string, mode: 'build' | 'ask' | 'general') => {
         if (!project) return;
         setIsAiLoading(true);
+        setSidebarTab('chat');
 
         const userMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'user', text: message };
         await addChatMessage(projectId, userMessage, dbInstance);
@@ -491,6 +503,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const handleAnalyzeCode = async () => {
         if (!project) return;
         setIsAiLoading(true);
+        setSidebarTab('chat');
         const userMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'user', text: "Please analyze the entire project for bugs, improvements, and best practices." };
         await addChatMessage(projectId, userMessage, dbInstance);
         try {
@@ -543,11 +556,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         }
     };
     
-    // FIX: This wrapper function correctly handles partial state updates from the AI service,
-    // resolving the TypeScript error where `setAgentState` was incompatible with the expected callback signature.
     const handleStartAutoDev = async (objective: string) => {
         if (!project) return;
         setIsAiLoading(true);
+        setSidebarTab('chat');
         setAgentState({ status: 'running', objective, plan: [], currentTaskIndex: -1, logs: [`Objective set: ${objective}`] });
         
         const onAgentMessage = async (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => {
@@ -558,7 +570,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         const handleAgentStateChange = (stateUpdate: Partial<AgentState>) => {
             setAgentState(prevState => {
                 const newState = { ...prevState, ...stateUpdate };
-                // Append logs instead of replacing them, as the service sends log snippets.
                 if (stateUpdate.logs) {
                     newState.logs = [...prevState.logs, ...stateUpdate.logs];
                 }
@@ -569,22 +580,28 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         try {
             const finalFiles = await runAutonomousAgent(objective, files, project, apiConfig, handleAgentStateChange, onAgentMessage, user.uid, apiPoolConfig, apiPoolKeys);
             
-            // This is a bit tricky, we need to calculate the diff and apply it
             const finalFileMap = new Map(finalFiles.map(f => [f.path, f]));
             const initialFileMap = new Map(files.map(f => [f.path, f]));
             const changes: AiChanges = { create: {}, update: {}, delete: [] };
 
-            finalFileMap.forEach((file, path) => {
-                if (!initialFileMap.has(path)) {
-                    changes.create![path] = file.content!;
-                } else if (initialFileMap.get(path)!.content !== file.content) {
-                    changes.update![path] = file.content!;
+            // FIX: The for...of loop over map entries was causing type inference issues with `file` being `unknown`. Reverting to a forEach loop which correctly infers the types for `file` and `path`.
+            // Re-FIX: Iterating over file arrays directly to resolve persistent type inference issues with Map iterators.
+            
+            // Detect creations and updates
+            // FIX: Explicitly type `file` as `FileNode` to resolve type inference issue.
+            finalFiles.forEach((file: FileNode) => {
+                const initialFile = initialFileMap.get(file.path);
+                if (!initialFile) {
+                    changes.create![file.path] = file.content || '';
+                } else if (initialFile.content !== file.content) {
+                    changes.update![file.path] = file.content || '';
                 }
             });
 
-            initialFileMap.forEach((file, path) => {
-                if (!finalFileMap.has(path)) {
-                    changes.delete!.push(path);
+            // Detect deletions
+            files.forEach(file => {
+                if (!finalFileMap.has(file.path)) {
+                    changes.delete!.push(file.path);
                 }
             });
 
@@ -593,11 +610,125 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-            // The agent service updates the state on error before throwing, so we only need to add the chat message.
              await addChatMessage(projectId, { sender: 'ai', text: `Agent stopped due to an error: ${errorMessage}` }, dbInstance);
         } finally {
             setIsAiLoading(false);
         }
+    };
+
+    const executeGodModeAction = useCallback(async (action: AiGodModeAction) => {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        try {
+            switch (action.type) {
+                case 'CLICK_ELEMENT':
+                    if (action.selector) {
+                        const el = document.querySelector(`[data-testid="${action.selector}"]`) as HTMLElement;
+                        if (el) el.click();
+                        else throw new Error(`Element with selector [${action.selector}] not found.`);
+                    }
+                    break;
+                case 'TYPE_IN_INPUT':
+                    if (action.selector && typeof action.payload === 'string') {
+                        const el = document.querySelector(`[data-testid="${action.selector}"]`) as HTMLInputElement | HTMLTextAreaElement;
+                        if (el) {
+                            el.focus();
+                            
+                            // This is the key to making React update state for controlled components
+                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+                            nativeInputValueSetter?.call(el, action.payload);
+
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                        } else {
+                            throw new Error(`Input with selector [${action.selector}] not found.`);
+                        }
+                    }
+                    break;
+                case 'MODIFY_FILES':
+                    if (action.payload && typeof action.payload === 'object') {
+                        await applyAiChanges(projectId, files, action.payload as AiChanges, dbInstance);
+                    }
+                    break;
+                case 'ASK_USER':
+                    if (typeof action.payload === 'string') {
+                        alert(`AI is asking: ${action.payload}`);
+                    }
+                    break;
+                case 'FINISH':
+                    setIsGodModeActive(false);
+                    setGodModeActionQueue([]);
+                    alert("God Mode has completed the objective.");
+                    break;
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "An unknown error occurred.";
+            alert(`God Mode Action Failed: ${message}`);
+            setIsGodModeActive(false);
+            setGodModeActionQueue([]);
+            setCurrentGodModeAction(null);
+            return;
+        }
+        setCurrentGodModeAction(null);
+    }, [projectId, files, dbInstance]);
+
+    useEffect(() => {
+        if (isGodModeActive && currentGodModeAction === null && godModeActionQueue.length > 0) {
+            const nextAction = godModeActionQueue[0];
+            setCurrentGodModeAction(nextAction);
+            setGodModeActionQueue(q => q.slice(1));
+            executeGodModeAction(nextAction);
+        } else if (isGodModeActive && godModeActionQueue.length === 0 && currentGodModeAction === null) {
+            // If the queue runs out but FINISH wasn't the last action
+            setIsGodModeActive(false);
+            alert("God Mode finished all planned steps.");
+        }
+    }, [isGodModeActive, currentGodModeAction, godModeActionQueue, executeGodModeAction]);
+
+    const generateUiContext = () => {
+        const elements = document.querySelectorAll('[data-testid]');
+        const context = Array.from(elements).map(el => {
+            const testId = (el as HTMLElement).dataset.testid || '';
+            let description = testId.replace('godmode-', '').replace(/-/g, ' ');
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                description += ' input field';
+            } else if (el.tagName === 'BUTTON') {
+                description += ' button';
+            }
+            return { selector: testId, description };
+        });
+        return JSON.stringify(context, null, 2);
+    };
+
+    const handleStartGodMode = async (objective: string) => {
+        if (!project) return;
+        setIsAiLoading(true);
+        setIsGodModeActive(true);
+        setCurrentGodModeAction({ type: 'CLICK_ELEMENT', reasoning: 'Starting God Mode and planning the steps...', selector: '' });
+
+        try {
+            const uiContext = generateUiContext();
+            const plan = await godModePlanner(objective, files, uiContext, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
+            if (plan && plan.length > 0) {
+                setGodModeActionQueue(plan);
+                setCurrentGodModeAction(null);
+            } else {
+                throw new Error("The AI did not return a valid plan.");
+            }
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "An unknown error occurred.";
+            alert(`God Mode Failed: ${message}`);
+            setIsGodModeActive(false);
+            setCurrentGodModeAction(null);
+        } finally {
+            setIsAiLoading(false);
+        }
+    };
+    
+    const handleStopGodMode = () => {
+        setIsGodModeActive(false);
+        setGodModeActionQueue([]);
+        setCurrentGodModeAction(null);
+        alert("God Mode stopped by user.");
     };
 
     const handleGenerateShareKey = async (pid: string) => {
@@ -632,18 +763,61 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             throw new Error("Could not create invite. Please try again.");
         }
     };
+    
+    const handleGenerateSvg = async (prompt: string, assetType: 'icon' | 'background'): Promise<string> => {
+        if (!project) throw new Error("Project context is not available.");
+        if (isAiLoading) throw new Error("Another AI task is already in progress.");
+        
+        setIsAiLoading(true);
+        try {
+            const svgCode = await generateSvgAsset(prompt, assetType, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
+            return svgCode;
+        } finally {
+            setIsAiLoading(false);
+        }
+    };
+    
+    const handleSaveSvgToFile = async (svgCode: string) => {
+        const filePath = prompt("Enter the full path for the new SVG file:", "src/assets/new-icon.svg");
+        if (filePath) {
+            try {
+                await addFileOrFolder(projectId, filePath, 'file', svgCode, dbInstance);
+                alert(`File saved to ${filePath}`);
+                setIsSvgDesignModalOpen(false);
+            } catch (err) {
+                const message = err instanceof Error ? err.message : "Could not save file.";
+                alert(`Error: ${message}`);
+            }
+        }
+    };
+    
+    const handleApplySvgAsIcon = async (svgCode: string) => {
+        if (!project) return;
+        const iconPath = 'public/icon.svg';
+        const existingIcon = files.find(f => f.path === iconPath);
+        const changes: AiChanges = {};
+
+        if (existingIcon) {
+            changes.update = { [iconPath]: svgCode };
+        } else {
+            changes.create = { [iconPath]: svgCode };
+        }
+
+        try {
+            await applyAiChanges(projectId, files, changes, dbInstance);
+            alert("Project icon updated successfully!");
+            setIsSvgDesignModalOpen(false);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Could not apply icon.";
+            alert(`Error: ${message}`);
+        }
+    };
 
     const handleMouseMove = useCallback((e: MouseEvent) => {
         if (isResizingSidebar.current) {
             const newWidth = e.clientX;
             if (newWidth > 200 && newWidth < 600) {
                 setSidebarWidth(newWidth);
-            }
-        }
-        if (isResizingChatPanel.current) {
-            const newWidth = window.innerWidth - e.clientX;
-            if (newWidth > 300 && newWidth < 800) {
-                 setChatPanelWidth(newWidth);
             }
         }
          if (isResizingVertical.current) {
@@ -666,15 +840,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
     const handleMouseUp = useCallback(() => {
         isResizingSidebar.current = false;
-        isResizingChatPanel.current = false;
         isResizingVertical.current = false;
         isResizingMain.current = false;
         document.body.style.cursor = 'default';
         localStorage.setItem('sidebarWidth', sidebarWidth.toString());
-        localStorage.setItem('chatPanelWidth', chatPanelWidth.toString());
         localStorage.setItem('bottomPanelHeight', bottomPanelHeight.toString());
         localStorage.setItem('editorWidthPercent', editorWidthPercent.toString());
-    }, [sidebarWidth, chatPanelWidth, bottomPanelHeight, editorWidthPercent]);
+    }, [sidebarWidth, bottomPanelHeight, editorWidthPercent]);
 
     useEffect(() => {
         window.addEventListener('mousemove', handleMouseMove);
@@ -685,12 +857,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         };
     }, [handleMouseMove, handleMouseUp]);
 
-
-    // Undo/Redo is not implemented yet. Placeholder.
     const [history, setHistory] = useState<FileNode[][]>([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
-    const canUndo = false; // historyIndex > 0;
-    const canRedo = false; // historyIndex < history.length - 1;
+    const canUndo = false;
+    const canRedo = false;
     const handleUndo = () => {};
     const handleRedo = () => {};
 
@@ -698,13 +868,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     
      const handleFileContentChange = (newContent: string) => {
         if (selectedFile) {
-            // Update local state for instant UI feedback
             setFiles(prevFiles =>
                 prevFiles.map(f =>
                     f.path === selectedFile.path ? { ...f, content: newContent } : f
                 )
             );
-            // Mark file as dirty
             setDirtyFiles(prev => new Set(prev).add(selectedFile.path));
         }
     };
@@ -755,17 +923,88 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             filePath: path,
             text: `Pinned file: ${path}`
         });
+        setSidebarTab('chat');
+    };
+
+    const handleCreateSnapshot = async () => {
+        if (!isOwner) {
+            alert("Only the project owner can create snapshots.");
+            return;
+        }
+        const message = prompt("Enter a brief description for this snapshot:");
+        if (message && message.trim()) {
+            try {
+                const fileData = JSON.stringify(files);
+                const compressedData = LZString.compressToUTF16(fileData);
+                await createSnapshot(projectId, message.trim(), compressedData, dbInstance);
+                alert("Snapshot created successfully!");
+            } catch (error) {
+                console.error("Failed to create snapshot:", error);
+                alert(`Error: ${error instanceof Error ? error.message : "Could not create snapshot."}`);
+            }
+        }
+    };
+
+    const handleDeleteSnapshot = async (snapshotId: string) => {
+        if (!isOwner) {
+            alert("Only the project owner can delete snapshots.");
+            return;
+        }
+        if (window.confirm("Are you sure you want to permanently delete this snapshot?")) {
+            try {
+                await deleteSnapshot(projectId, snapshotId, dbInstance);
+            } catch (error) {
+                console.error("Failed to delete snapshot:", error);
+                alert(`Error: ${error instanceof Error ? error.message : "Could not delete snapshot."}`);
+            }
+        }
+    };
+
+    const handleDuplicateFile = async (path: string) => {
+        const originalFile = files.find(f => f.path === path);
+        if (!originalFile || originalFile.type === 'folder') return;
+
+        let newPath = '';
+        let counter = 1;
+        const parts = originalFile.path.split('.');
+        const extension = parts.length > 1 ? '.' + parts.pop() : '';
+        const baseName = parts.join('.');
+        
+        do {
+            const suffix = counter === 1 ? '-copy' : `-copy-${counter}`;
+            newPath = `${baseName}${suffix}${extension}`;
+            counter++;
+        } while (files.some(f => f.path === newPath));
+
+        try {
+            await addFileOrFolder(projectId, newPath, 'file', originalFile.content || '', dbInstance);
+            setSelectedFilePath(newPath);
+        } catch(e) {
+            alert(`Error duplicating file: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
     };
     
     const contextMenuItems = useMemo((): ContextMenuItem[] => {
         if (!contextMenu) return [];
-        return [
+        const node = files.find(f => f.path === contextMenu.path);
+        const isFile = node?.type === 'file';
+
+        const items: ContextMenuItem[] = [
             { label: 'Pin to Chat', icon: <PaperClipIcon className="w-4 h-4" />, action: () => handlePinToChat(contextMenu.path) },
             { label: 'Rename', icon: <PencilIcon className="w-4 h-4" />, action: () => handleRenameFile(contextMenu.path) },
-            { label: 'Copy Path', icon: <ArrowRightIcon className="w-4 h-4" />, action: () => navigator.clipboard.writeText(contextMenu.path) },
-            { label: 'Delete', icon: <TrashIcon className="w-4 h-4 text-red-400" />, action: () => handleFileDelete(contextMenu.path) },
         ];
-    }, [contextMenu, handlePinToChat, handleRenameFile, handleFileDelete]);
+
+        if (isFile) {
+            items.push({ label: 'Duplicate', icon: <DocumentDuplicateIcon className="w-4 h-4" />, action: () => handleDuplicateFile(contextMenu.path) });
+        }
+        
+        items.push(
+            { label: 'Copy Path', icon: <ArrowRightIcon className="w-4 h-4" />, action: () => navigator.clipboard.writeText(contextMenu.path) },
+            { label: 'Delete', icon: <TrashIcon className="w-4 h-4 text-red-400" />, action: () => handleFileDelete(contextMenu.path) }
+        );
+
+        return items;
+    }, [contextMenu, files]);
 
 
     if (isLoading) {
@@ -789,16 +1028,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     }
 
     if (isMobile) {
-        const CurrentView = () => {
-            switch(mobileView) {
-                case 'files': return <FileExplorer files={files} selectedFilePath={selectedFilePath} onFileSelect={handleFileSelect} onFileDelete={handleFileDelete} onFileAdd={handleFileAdd} onFileUpload={handleFileUpload} onContextMenuRequest={handleContextMenuRequest} />;
-                case 'chat': return <ChatInterface messages={chatMessages} onSendMessage={handleSendMessage} isLoading={isAiLoading} onApprovePlan={handleApprovePlan} onRejectPlan={handleRejectPlan} projectMembers={projectMembers} currentUser={user} isOwner={isOwner} files={files} project={project} apiConfig={apiConfig} apiPoolConfig={apiPoolConfig} apiPoolKeys={apiPoolKeys} currentUserId={user.uid} onSendRichMessage={handleSendRichMessage} onDeleteMessage={(id) => deleteChatMessage(projectId, id, dbInstance)} onOpenFileFromPin={handleFileSelect}/>;
-                case 'editor': return selectedFile ? <CodeEditor filePath={selectedFile.path} content={selectedFile.content || ''} onChange={handleFileContentChange} onSave={handleSaveFile} isDirty={dirtyFiles.has(selectedFile.path)} isSavingFile={savingFile === selectedFile.path} isMobile onBack={() => setMobileView('files')} /> : <div className="p-4 text-center text-neutral">Select a file to edit.</div>;
-                case 'preview': return <SandboxPreview files={files} projectType={project.type} isMobile />;
-                default: return <FileExplorer files={files} selectedFilePath={selectedFilePath} onFileSelect={handleFileSelect} onFileDelete={handleFileDelete} onFileAdd={handleFileAdd} onFileUpload={handleFileUpload} onContextMenuRequest={handleContextMenuRequest} />;
-            }
-        }
-
         return (
             <div className="h-screen w-screen flex flex-col bg-base-100 overflow-hidden">
                 <Header 
@@ -806,32 +1035,70 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                     onSettingsClick={() => setIsSettingsModalOpen(true)} onUndo={handleUndo} onRedo={handleRedo}
                     canUndo={canUndo} canRedo={canRedo} onAnalyzeClick={handleAnalyzeCode}
                     onBuildClick={() => setIsBuildModalOpen(true)} onAutoDevClick={() => setIsAutoDevModalOpen(true)}
+                    onGodModeClick={() => setIsGodModeModalOpen(true)}
                     onDebugRefactorClick={() => setIsDebugRefactorModalOpen(true)} onBackToDashboard={onBackToDashboard}
                     onTogglePreview={() => setMobileView('preview')} onToggleFullScreenPreview={() => setMobileView('preview')}
                     onToggleBottomPanel={() => {}} onProfileClick={() => setIsProfileModalOpen(true)} onShareClick={() => setIsShareModalOpen(true)}
                     onDeployClick={() => setIsDeploymentModalOpen(true)}
+                    onDesignClick={() => setIsSvgDesignModalOpen(true)}
                     isAiLoading={isAiLoading} isMobile
                 />
-                <main className="flex-grow overflow-y-auto">
-                    <CurrentView />
+                <main className="flex-grow overflow-hidden">
+                    <div className="h-full" style={{ display: mobileView === 'files' ? 'block' : 'none' }}>
+                        <FileExplorer files={files} selectedFilePath={selectedFilePath} onFileSelect={handleFileSelect} onFileDelete={handleFileDelete} onFileAdd={handleFileAdd} onFileUpload={handleFileUpload} onContextMenuRequest={handleContextMenuRequest} />
+                    </div>
+                    <div className="h-full" style={{ display: mobileView === 'chat' ? 'block' : 'none' }}>
+                        <ChatInterface messages={chatMessages} onSendMessage={handleSendMessage} isLoading={isAiLoading} onApprovePlan={handleApprovePlan} onRejectPlan={handleRejectPlan} projectMembers={projectMembers} currentUser={user} isOwner={isOwner} files={files} project={project} apiConfig={apiConfig} apiPoolConfig={apiPoolConfig} apiPoolKeys={apiPoolKeys} currentUserId={user.uid} onSendRichMessage={handleSendRichMessage} onDeleteMessage={(id) => deleteChatMessage(projectId, id, dbInstance)} onOpenFileFromPin={handleFileSelect}/>
+                    </div>
+                    <div className="h-full" style={{ display: mobileView === 'editor' ? 'block' : 'none' }}>
+                        {selectedFile ? <CodeEditor filePath={selectedFile.path} content={selectedFile.content || ''} onChange={handleFileContentChange} onSave={handleSaveFile} isDirty={dirtyFiles.has(selectedFile.path)} isSavingFile={savingFile === selectedFile.path} isMobile onBack={() => setMobileView('files')} /> : <div className="p-4 text-center text-neutral">Select a file to edit.</div>}
+                    </div>
+                    <div className="h-full" style={{ display: mobileView === 'preview' ? 'block' : 'none' }}>
+                        <SandboxPreview files={files} projectType={project.type} isMobile />
+                    </div>
                 </main>
                 <MobileNavBar activeView={mobileView} onViewChange={setMobileView} isEditorDisabled={!selectedFilePath} />
+                <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onSave={onApiConfigChange} currentConfig={apiConfig} />
+                <ProjectSettingsModal 
+                    isOpen={isSettingsModalOpen} 
+                    onClose={() => setIsSettingsModalOpen(false)} 
+                    onSave={handleSaveSettings} 
+                    project={project} 
+                    isSaving={isAiLoading}
+                    members={projectMembers}
+                    onRemoveMember={handleRemoveMember}
+                    onCreateInvite={handleCreateInvite}
+                    onUpdateSuccess={refreshUserProfile}
+                />
+                <BuildModeModal isOpen={isBuildModalOpen} onClose={() => setIsBuildModalOpen(false)} onBuild={(prompt) => handleSendMessage(prompt, 'build')} isLoading={isAiLoading} />
+                <AutonomousModeModal isOpen={isAutoDevModalOpen} onClose={() => {setAgentState({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] }); setIsAutoDevModalOpen(false)}} onStart={handleStartAutoDev} agentState={agentState} />
+                <DebugRefactorModal isOpen={isDebugRefactorModalOpen} onClose={() => {setProposedFixes(null); setIsDebugRefactorModalOpen(false)}} onProposeFixes={handleProposeFixes} onApplyFixes={handleApplyFixes} isLoading={isFixing} proposedChanges={proposedFixes} selectedFile={selectedFile} />
+                <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />
+                <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} projectId={projectId} onGenerateKey={handleGenerateShareKey} isCollaborationEnabled={isCollaborationEnabled} ownerUid={project.ownerId} />
+                <DeploymentModal isOpen={isDeploymentModalOpen} onClose={() => setIsDeploymentModalOpen(false)} onDeployCodeSandbox={()=>{}} isDeploying={isDeploying} />
+                 <SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading}/>
+                <GodModeModal isOpen={isGodModeModalOpen} onClose={() => setIsGodModeModalOpen(false)} onStart={handleStartGodMode} isLoading={isAiLoading} apiConfig={apiConfig} />
+                {isFullScreenPreview && <SandboxPreview files={files} projectType={project.type} isFullScreen onCloseFullScreen={() => setIsFullScreenPreview(false)} />}
+                {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenuItems} onClose={() => setContextMenu(null)} />}
             </div>
         )
     }
 
     return (
         <div className="h-screen w-screen flex flex-col bg-base-100 overflow-hidden">
+            {isGodModeActive && <GodModeStatus currentAction={currentGodModeAction} onStop={handleStopGodMode} />}
             <Header 
                 user={user} project={project} onDownload={handleDownload} onApiKeyClick={() => setIsApiKeyModalOpen(true)}
                 onSettingsClick={() => setIsSettingsModalOpen(true)} onUndo={handleUndo} onRedo={handleRedo}
                 canUndo={canUndo} canRedo={canRedo} onAnalyzeClick={handleAnalyzeCode}
                 onBuildClick={() => setIsBuildModalOpen(true)} onAutoDevClick={() => setIsAutoDevModalOpen(true)}
+                onGodModeClick={() => setIsGodModeModalOpen(true)}
                 onDebugRefactorClick={() => setIsDebugRefactorModalOpen(true)} onBackToDashboard={onBackToDashboard}
                 onTogglePreview={() => setIsPreviewPaneOpen(!isPreviewPaneOpen)} onToggleFullScreenPreview={() => setIsFullScreenPreview(true)}
                 onToggleBottomPanel={() => setIsBottomPanelOpen(!isBottomPanelOpen)} onProfileClick={() => setIsProfileModalOpen(true)}
                 onShareClick={() => setIsShareModalOpen(true)}
                 onDeployClick={() => setIsDeploymentModalOpen(true)}
+                onDesignClick={() => setIsSvgDesignModalOpen(true)}
                 isAiLoading={isAiLoading} isMobile={false}
             />
             <main className="flex-grow flex overflow-hidden">
@@ -848,6 +1115,25 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                         isGenerating={isGeneratingInitialProject}
                         onContextMenuRequest={handleContextMenuRequest}
                         isCollaborationEnabled={isCollaborationEnabled}
+                        messages={chatMessages}
+                        onSendMessage={handleSendMessage}
+                        isLoading={isAiLoading}
+                        onApprovePlan={handleApprovePlan}
+                        onRejectPlan={handleRejectPlan}
+                        projectMembers={projectMembers}
+                        currentUser={user}
+                        isOwner={isOwner}
+                        project={project}
+                        apiConfig={apiConfig}
+                        apiPoolConfig={apiPoolConfig}
+                        apiPoolKeys={apiPoolKeys}
+                        currentUserId={user.uid}
+                        onSendRichMessage={handleSendRichMessage}
+                        onDeleteMessage={(id) => deleteChatMessage(projectId, id, dbInstance)}
+                        onOpenFileFromPin={handleFileSelect}
+                        snapshots={snapshots}
+                        onCreateSnapshot={handleCreateSnapshot}
+                        onDeleteSnapshot={handleDeleteSnapshot}
                     />
                 </div>
                  <div onMouseDown={() => {isResizingSidebar.current = true; document.body.style.cursor = 'col-resize';}} className="w-1.5 h-full cursor-col-resize bg-base-300 hover:bg-primary transition-colors shrink-0"></div>
@@ -881,29 +1167,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                         </>
                     )}
                 </div>
-
-                <div onMouseDown={() => {isResizingChatPanel.current = true; document.body.style.cursor = 'col-resize';}} className="w-1.5 h-full cursor-col-resize bg-base-300 hover:bg-primary transition-colors shrink-0"></div>
-                <div style={{ width: `${chatPanelWidth}px` }} className="shrink-0 h-full">
-                    <ChatInterface 
-                        messages={chatMessages}
-                        onSendMessage={handleSendMessage}
-                        isLoading={isAiLoading}
-                        onApprovePlan={handleApprovePlan}
-                        onRejectPlan={handleRejectPlan}
-                        projectMembers={projectMembers}
-                        currentUser={user}
-                        isOwner={isOwner}
-                        files={files}
-                        project={project}
-                        apiConfig={apiConfig}
-                        apiPoolConfig={apiPoolConfig}
-                        apiPoolKeys={apiPoolKeys}
-                        currentUserId={user.uid}
-                        onSendRichMessage={handleSendRichMessage}
-                        onDeleteMessage={(id) => deleteChatMessage(projectId, id, dbInstance)}
-                        onOpenFileFromPin={handleFileSelect}
-                    />
-                </div>
             </main>
 
             <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onSave={onApiConfigChange} currentConfig={apiConfig} />
@@ -916,6 +1179,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 members={projectMembers}
                 onRemoveMember={handleRemoveMember}
                 onCreateInvite={handleCreateInvite}
+                onUpdateSuccess={refreshUserProfile}
             />
             <BuildModeModal isOpen={isBuildModalOpen} onClose={() => setIsBuildModalOpen(false)} onBuild={(prompt) => handleSendMessage(prompt, 'build')} isLoading={isAiLoading} />
             <AutonomousModeModal isOpen={isAutoDevModalOpen} onClose={() => {setAgentState({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] }); setIsAutoDevModalOpen(false)}} onStart={handleStartAutoDev} agentState={agentState} />
@@ -923,6 +1187,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />
             <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} projectId={projectId} onGenerateKey={handleGenerateShareKey} isCollaborationEnabled={isCollaborationEnabled} ownerUid={project.ownerId} />
             <DeploymentModal isOpen={isDeploymentModalOpen} onClose={() => setIsDeploymentModalOpen(false)} onDeployCodeSandbox={()=>{}} isDeploying={isDeploying} />
+            <SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading}/>
+            <GodModeModal isOpen={isGodModeModalOpen} onClose={() => setIsGodModeModalOpen(false)} onStart={handleStartGodMode} isLoading={isAiLoading} apiConfig={apiConfig} />
             {isFullScreenPreview && <SandboxPreview files={files} projectType={project.type} isFullScreen onCloseFullScreen={() => setIsFullScreenPreview(false)} />}
             {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenuItems} onClose={() => setContextMenu(null)} />}
         </div>

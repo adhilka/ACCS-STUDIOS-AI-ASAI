@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { AiChatMessage, AiPlan, ChatMessageSenderInfo, FileNode, Project, ApiConfig, ApiPoolConfig, ApiPoolKey, User } from '../types';
 import { UserIcon, AiIcon, FileIcon, DeleteIcon, RobotIcon, CodeIcon, AnalyzeIcon, BrainIcon, RocketIcon, CopyIcon, CheckIcon, UsersIcon } from './icons';
 import { generateCodeSnippet } from '../services/aiService';
@@ -236,10 +236,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
     const [showMentionPopup, setShowMentionPopup] = useState(false);
 
     const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
     };
 
-    useEffect(scrollToBottom, [messages]);
+    useLayoutEffect(scrollToBottom, [messages]);
     
     useEffect(() => {
         if (textareaRef.current) {
@@ -364,7 +364,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
         <div className="h-full bg-base-100 flex flex-col">
             <div className="p-3 mb-2 border-b border-base-300">
                 <div className="flex items-center gap-2">
-                    {isCollaborationEnabled() && <UsersIcon className="w-5 h-5 text-secondary" />}
+                    {isCollaborationEnabled() ? <UsersIcon className="w-5 h-5 text-secondary" /> : <AiIcon className="w-5 h-5 text-accent" />}
                     <h3 className="text-sm font-semibold tracking-wider uppercase text-base-content">
                         {isCollaborationEnabled() ? "Team Chat" : "AI Chat"}
                     </h3>
@@ -424,9 +424,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
             <form onSubmit={handleSend} className="p-2 border-t border-base-300">
                  {!isCollaborationEnabled() && (
                     <div className="flex items-center gap-2 mb-2 px-1">
-                        <button type="button" onClick={() => setMode('build')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'build' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Build</button>
-                        <button type="button" onClick={() => setMode('ask')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'ask' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Ask Project</button>
-                        <button type="button" onClick={() => setMode('general')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'general' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Ask General</button>
+                        <button type="button" data-testid="godmode-chat-build-button" onClick={() => setMode('build')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'build' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Build</button>
+                        <button type="button" data-testid="godmode-chat-ask-button" onClick={() => setMode('ask')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'ask' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Ask Project</button>
+                        <button type="button" data-testid="godmode-chat-general-button" onClick={() => setMode('general')} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${mode === 'general' ? 'bg-primary text-white' : 'bg-base-200 text-neutral hover:bg-base-300'}`}>Ask General</button>
                     </div>
                  )}
                 <div className="relative">
@@ -444,6 +444,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                     )}
                     <textarea
                         ref={textareaRef}
+                        data-testid="godmode-chat-input"
                         rows={1}
                         value={input}
                         onChange={handleInputChange}
@@ -457,7 +458,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                         className="w-full bg-base-200 border border-base-300/80 rounded-md py-2 pl-3 pr-10 text-base-content focus:outline-none focus:ring-2 focus:ring-primary resize-none max-h-40"
                         disabled={isLoading}
                     />
-                    <button type="submit" disabled={isLoading || !input.trim()} className="absolute bottom-2 right-0 flex items-center justify-center px-3 text-primary hover:opacity-80 disabled:text-neutral/50 disabled:cursor-not-allowed">
+                    <button type="submit" data-testid="godmode-chat-send-button" disabled={isLoading || !input.trim()} className="absolute bottom-2 right-0 flex items-center justify-center px-3 text-primary hover:opacity-80 disabled:text-neutral/50 disabled:cursor-not-allowed">
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"></path></svg>
                     </button>
                 </div>

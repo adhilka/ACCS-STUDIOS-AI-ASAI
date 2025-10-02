@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { DownloadIcon, KeyIcon, CodeIcon, SettingsIcon, UndoIcon, RedoIcon, AnalyzeIcon, AiIcon, RobotIcon, WrenchScrewdriverIcon, ArrowLeftIcon, PlayIcon, UserIcon, ShareIcon, CommandLineIcon, RocketIcon, ExternalLinkIcon } from './icons';
+import { DownloadIcon, KeyIcon, CodeIcon, SettingsIcon, UndoIcon, RedoIcon, AnalyzeIcon, AiIcon, RobotIcon, WrenchScrewdriverIcon, ArrowLeftIcon, PlayIcon, UserIcon, ShareIcon, CommandLineIcon, RocketIcon, ExternalLinkIcon, PaintBrushIcon, CrownIcon } from './icons';
 import { User } from '../types';
 import { auth } from '../services/firebase';
 import { useBranding } from '../contexts/BrandingContext';
@@ -18,6 +18,7 @@ interface HeaderProps {
     onAnalyzeClick: () => void;
     onBuildClick: () => void;
     onAutoDevClick: () => void;
+    onGodModeClick: () => void;
     onDebugRefactorClick: () => void;
     onBackToDashboard: () => void;
     onTogglePreview: () => void;
@@ -26,6 +27,7 @@ interface HeaderProps {
     onProfileClick: () => void;
     onShareClick: () => void;
     onDeployClick: () => void;
+    onDesignClick: () => void;
     isAiLoading: boolean;
     isMobile: boolean;
 }
@@ -33,9 +35,9 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ 
     user, project, onDownload, onApiKeyClick, onSettingsClick, 
     onUndo, onRedo, canUndo, canRedo, onAnalyzeClick, onBuildClick, 
-    onAutoDevClick, onDebugRefactorClick, onBackToDashboard,
+    onAutoDevClick, onGodModeClick, onDebugRefactorClick, onBackToDashboard,
     onTogglePreview, onToggleFullScreenPreview, onToggleBottomPanel, 
-    onProfileClick, onShareClick, onDeployClick,
+    onProfileClick, onShareClick, onDeployClick, onDesignClick,
     isAiLoading,
     isMobile
 }) => {
@@ -70,6 +72,10 @@ const Header: React.FC<HeaderProps> = ({
 
   const DesktopHeader = () => (
      <div className="flex items-center space-x-1 sm:space-x-2">
+       <button onClick={onGodModeClick} className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-yellow-600 hover:bg-yellow-500 text-white transition-colors" title="God Mode">
+        <CrownIcon className="w-5 h-5" />
+        <span className="text-sm font-semibold hidden sm:inline">God Mode</span>
+      </button>
        <button onClick={onAutoDevClick} className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-secondary hover:opacity-90 text-white transition-colors" title="Autonomous Mode">
         <RobotIcon className="w-5 h-5" />
         <span className="text-sm font-semibold hidden sm:inline">Auto-Dev</span>
@@ -101,6 +107,9 @@ const Header: React.FC<HeaderProps> = ({
       <button onClick={onShareClick} className="p-2 rounded-md hover:bg-base-300 transition-colors" title="Share Project">
           <ShareIcon className="w-5 h-5 text-neutral" />
       </button>
+       <button onClick={onDesignClick} className="p-2 rounded-md hover:bg-base-300 transition-colors" title="AI Design Studio">
+        <PaintBrushIcon className="w-5 h-5 text-accent" />
+      </button>
       <button onClick={onAnalyzeClick} className="p-2 rounded-md hover:bg-base-300 transition-colors" title="Analyze Project">
         <AnalyzeIcon className="w-5 h-5 text-neutral" />
       </button>
@@ -108,7 +117,7 @@ const Header: React.FC<HeaderProps> = ({
         <WrenchScrewdriverIcon className="w-5 h-5 text-yellow-500" />
       </button>
       <div className="h-6 w-px bg-base-300 mx-1"></div>
-      <button onClick={onSettingsClick} className="p-2 rounded-md hover:bg-base-300 transition-colors" title="Project Settings">
+      <button data-testid="godmode-open-settings-modal" onClick={onSettingsClick} className="p-2 rounded-md hover:bg-base-300 transition-colors" title="Project Settings">
         <SettingsIcon className="w-5 h-5 text-neutral" />
       </button>
       <button onClick={onApiKeyClick} className="p-2 rounded-md hover:bg-base-300 transition-colors" title="API Key Settings">
@@ -144,9 +153,11 @@ const Header: React.FC<HeaderProps> = ({
 
     return (
       <div ref={menuRef} className="absolute top-full right-2 mt-2 w-64 bg-base-200 border border-base-300 rounded-lg shadow-xl z-50 py-2">
-        <MenuItem icon={<AiIcon className="w-5 h-5 text-primary" />} text="Build Mode" onClick={onBuildClick} />
+        <MenuItem icon={<CrownIcon className="w-5 h-5 text-yellow-500" />} text="God Mode" onClick={onGodModeClick} />
         <MenuItem icon={<RobotIcon className="w-5 h-5 text-secondary" />} text="Autonomous Mode" onClick={onAutoDevClick} />
+        <MenuItem icon={<AiIcon className="w-5 h-5 text-primary" />} text="Build Mode" onClick={onBuildClick} />
         <div className="h-px bg-base-300 my-1 mx-2"></div>
+        <MenuItem icon={<PaintBrushIcon className="w-5 h-5 text-accent" />} text="AI Design Studio" onClick={onDesignClick} />
         <MenuItem icon={<PlayIcon className="w-5 h-5 text-neutral" />} text="Full Screen Preview" onClick={onToggleFullScreenPreview} />
         <MenuItem icon={<CommandLineIcon className="w-5 h-5 text-neutral" />} text="Toggle Console" onClick={onToggleBottomPanel} />
         <div className="h-px bg-base-300 my-1 mx-2"></div>

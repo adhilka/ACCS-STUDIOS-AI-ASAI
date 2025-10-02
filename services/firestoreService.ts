@@ -1,6 +1,6 @@
 import firebase, { firestore, serverTimestamp } from './firebase';
 // FIX: Import admin-related types to support the new feature.
-import { Project, FileNode, AiChanges, ApiConfig, AiChatMessage, AiProvider, ApiPoolConfig, ApiPoolKey, AdminUser, User, AdminSettings, PlatformError, CustomFirebaseConfig, ChatMessageSenderInfo, Invite } from '../types';
+import { Project, FileNode, AiChanges, ApiConfig, AiChatMessage, AiProvider, ApiPoolConfig, ApiPoolKey, AdminUser, User, AdminSettings, PlatformError, CustomFirebaseConfig, ChatMessageSenderInfo, Invite, Snapshot } from '../types';
 
 const projectsCollection = firestore.collection('projects');
 const userSettingsCollection = firestore.collection('userSettings');
@@ -514,6 +514,48 @@ export const clearChatHistory = async (projectId: string, db: firebase.firestore
     });
     await batch.commit();
 };
+
+// --- Snapshots ---
+export const createSnapshot = async (
+  projectId: string,
+  triggeringPrompt: string,
+  fileData: string,
+  db: firebase.firestore.Firestore = firestore
+): Promise<string> => {
+  const docRef = await db.collection('projects').doc(projectId).collection('snapshots').add({
+    createdAt: serverTimestamp(),
+    triggeringPrompt,
+    fileData,
+  });
+  return docRef.id;
+};
+
+export const streamSnapshots = (
+  projectId: string,
+  callback: (snapshots: Snapshot[]) => void,
+  db: firebase.firestore.Firestore = firestore
+): (() => void) => {
+  return db.collection('projects').doc(projectId).collection('snapshots').orderBy('createdAt', 'desc')
+    .onSnapshot(
+      (snapshot) => {
+        const snapshots = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Snapshot));
+        callback(snapshots);
+      },
+      (error) => {
+        console.error(`Error streaming snapshots for project ${projectId}:`, error);
+        callback([]);
+      }
+    );
+};
+
+export const deleteSnapshot = async (
+  projectId: string,
+  snapshotId: string,
+  db: firebase.firestore.Firestore = firestore
+): Promise<void> => {
+  await db.collection('projects').doc(projectId).collection('snapshots').doc(snapshotId).delete();
+};
+
 
 // --- Usage Statistics ---
 
