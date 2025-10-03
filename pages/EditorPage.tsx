@@ -31,6 +31,7 @@ import ChatInterface from '../components/ChatInterface';
 import MobileNavBar from '../components/MobileNavBar';
 import FileExplorer from '../components/FileExplorer';
 import SvgDesignModal from '../components/SvgDesignModal';
+import TodoListPanel from '../components/TodoListPanel';
 // FIX: Import GodModeModal to be used in the component.
 import GodModeModal from '../components/GodModeModal';
 import GodModeStatus from '../components/GodModeStatus';
@@ -65,7 +66,7 @@ interface EditorPageProps {
     refreshUserProfile: () => void;
 }
 
-type MobileView = 'files' | 'chat' | 'editor' | 'preview';
+type MobileView = 'files' | 'chat' | 'todo' | 'editor' | 'preview';
 
 const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, user, apiConfig, onApiConfigChange, initialGenerationTask, onTaskConsumed, apiPoolConfig, apiPoolKeys, refreshUserProfile }) => {
     const [project, setProject] = useState<Project | null>(null);
@@ -133,16 +134,18 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
     const findFileMentions = (text: string, projectFiles: FileNode[]): string[] => {
         if (!text) return [];
-        const filePaths = projectFiles.map(f => f.path);
+        const filePaths = new Set(projectFiles.map(f => f.path));
         const foundPaths = new Set<string>();
 
-        filePaths.sort((a, b) => b.length - a.length);
-
-        for (const path of filePaths) {
-            if (text.includes(path)) {
-              foundPaths.add(path);
+        const backtickRegex = /`([^`]+)`/g;
+        let match;
+        while ((match = backtickRegex.exec(text)) !== null) {
+            const potentialPath = match[1].trim();
+            if (filePaths.has(potentialPath)) {
+                foundPaths.add(potentialPath);
             }
         }
+
         return Array.from(foundPaths);
     };
     
@@ -166,105 +169,101 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
 
     useEffect(() => {
-        // This effect handles the DB instance logic and data migration if needed
-        const setupDbInstance = async () => {
+        let isMounted = true;
+        const unsubscribers: (() => void)[] = [];
+    
+        const initialize = async () => {
+            if (!isMounted) return;
             setIsLoading(true);
             setMigrationStatus('');
+    
             try {
-                const initialProjectDetails = await getProjectDetails(projectId, firestore); // Always check primary DB first
+                const initialProjectDetails = await getProjectDetails(projectId, firestore);
                 if (!initialProjectDetails) throw new Error("Project not found in the primary database.");
                 
-                setProject(initialProjectDetails); // Set initial project data to prevent UI flashing empty
+                if (isMounted) setProject(initialProjectDetails);
     
                 const ownerProfile = await getUserProfile(initialProjectDetails.ownerId);
                 const customConfig = ownerProfile?.customFirebaseConfig;
     
+                let finalDb = firestore;
+                let collabEnabled = false;
+    
                 if (customConfig?.enabled && customConfig.apiKey && customConfig.projectId) {
-                    console.log("Custom Firebase config enabled. Attempting connection...");
-                    setIsCollaborationEnabled(true);
-                    const secondaryApp = getSecondaryFirebaseApp(customConfig, initialProjectDetails.ownerId);
-                    const secondaryDb = secondaryApp.firestore();
-                    
-                    await secondaryDb.collection('asai-connection-test').doc('test-doc').get();
-                    console.log("Connection to custom server successful.");
-    
-                    const projectDocOnSecondary = await secondaryDb.collection('projects').doc(projectId).get();
-                    if (!projectDocOnSecondary.exists) {
-                        setMigrationStatus("First-time connection detected. Copying project data to your server... This may take a moment.");
+                    try {
+                        console.log("Custom Firebase config enabled. Attempting connection...");
+                        const secondaryApp = getSecondaryFirebaseApp(customConfig, initialProjectDetails.ownerId);
+                        const secondaryDb = secondaryApp.firestore();
                         
-                        const [filesFromPrimary, chatFromPrimary] = await Promise.all([
-                            getProjectFiles(projectId, firestore),
-                            getChatHistory(projectId, firestore)
-                        ]);
-    
-                        const batch = secondaryDb.batch();
-                        const { id, ...projectData } = initialProjectDetails;
-                        const secondaryProjectRef = secondaryDb.collection('projects').doc(projectId);
-                        batch.set(secondaryProjectRef, projectData);
-    
-                        filesFromPrimary.forEach(file => {
-                            const { id, ...fileData } = file;
-                            batch.set(secondaryProjectRef.collection('files').doc(), fileData);
-                        });
-    
-                        chatFromPrimary.forEach(msg => {
-                            const { id, ...msgData } = msg;
-                            batch.set(secondaryProjectRef.collection('chatHistory').doc(), msgData);
-                        });
-    
-                        await batch.commit();
-                        setMigrationStatus("Project data successfully copied. Finalizing connection...");
-                        console.log("Migration complete.");
+                        await secondaryDb.collection('asai-connection-test').doc('test-doc').get();
+                        console.log("Connection to custom server successful.");
+        
+                        const projectDocOnSecondary = await secondaryDb.collection('projects').doc(projectId).get();
+                        if (!projectDocOnSecondary.exists) {
+                            if (isMounted) setMigrationStatus("First-time connection detected. Copying project data to your server... This may take a moment.");
+                            
+                            const [filesFromPrimary, chatFromPrimary] = await Promise.all([
+                                getProjectFiles(projectId, firestore),
+                                getChatHistory(projectId, firestore)
+                            ]);
+        
+                            const batch = secondaryDb.batch();
+                            const { id, ...projectData } = initialProjectDetails;
+                            const secondaryProjectRef = secondaryDb.collection('projects').doc(projectId);
+                            batch.set(secondaryProjectRef, projectData);
+        
+                            filesFromPrimary.forEach(file => {
+                                const { id, ...fileData } = file;
+                                batch.set(secondaryProjectRef.collection('files').doc(), fileData);
+                            });
+        
+                            chatFromPrimary.forEach(msg => {
+                                const { id, ...msgData } = msg;
+                                batch.set(secondaryProjectRef.collection('chatHistory').doc(), msgData);
+                            });
+        
+                            await batch.commit();
+                            if (isMounted) setMigrationStatus("Project data successfully copied. Finalizing connection...");
+                            console.log("Migration complete.");
+                        }
+                        
+                        finalDb = secondaryDb;
+                        collabEnabled = true;
+
+                    } catch (collabError) {
+                         console.error("Failed to initialize or connect to custom Firebase server:", collabError);
+                         alert("Could not connect to the project's custom server. Real-time collaboration is disabled. Please check the owner's configuration and security rules.");
                     }
-                    
-                    setDbInstance(secondaryDb);
-                } else {
-                    console.log("Using primary Firebase instance.");
-                    setIsCollaborationEnabled(false);
-                    setDbInstance(firestore);
                 }
+                
+                if (!isMounted) return;
+    
+                setDbInstance(finalDb);
+                setIsCollaborationEnabled(collabEnabled);
+                
+                unsubscribers.push(streamProjectDetails(projectId, (proj) => { if (isMounted) setProject(proj); }, finalDb));
+                unsubscribers.push(streamProjectFiles(projectId, (files) => { if (isMounted) setFiles(files); }, finalDb));
+                unsubscribers.push(streamChatHistory(projectId, (messages) => { if (isMounted) setChatMessages(messages); }, finalDb));
+                unsubscribers.push(streamSnapshots(projectId, (snapshots) => { if (isMounted) setSnapshots(snapshots); }, finalDb));
+    
             } catch (error) {
-                console.error("Failed to initialize or connect to custom Firebase server:", error);
-                alert("Could not connect to the project's custom server. Real-time collaboration is disabled. Please check the owner's configuration and security rules.");
-                setIsCollaborationEnabled(false);
-                setDbInstance(firestore); // Fallback to primary
+                console.error("Failed to load project:", error);
+                if (isMounted) setProject(null); // Ensure project is null on error to show error screen
             } finally {
-                setMigrationStatus('');
+                if (isMounted) {
+                    setIsLoading(false);
+                    setMigrationStatus('');
+                }
             }
         };
-    
-        setupDbInstance();
-    }, [projectId, user]); // Rerun if user object changes (e.g. after profile update)
-
-    useEffect(() => {
-        // This effect sets up all real-time listeners once the dbInstance is determined.
-        const unsubProject = streamProjectDetails(projectId, (proj) => {
-            setProject(proj);
-        }, dbInstance);
-
-        const unsubFiles = streamProjectFiles(projectId, (files) => {
-            setFiles(files);
-        }, dbInstance);
-
-        const unsubChat = streamChatHistory(projectId, (messages) => {
-            setChatMessages(messages);
-        }, dbInstance);
-
-        const unsubSnapshots = streamSnapshots(projectId, (snapshots) => {
-            setSnapshots(snapshots);
-        }, dbInstance);
         
-        // A small delay helps ensure initial data is processed before hiding the loader.
-        const timer = setTimeout(() => setIsLoading(false), 500);
-
+        initialize();
+        
         return () => {
-            unsubProject();
-            unsubFiles();
-            unsubChat();
-            unsubSnapshots();
-            clearTimeout(timer);
+            isMounted = false;
+            unsubscribers.forEach(unsub => unsub());
         };
-    }, [projectId, dbInstance]);
+    }, [projectId, user]);
 
     useEffect(() => {
         // Auto-select first file if none is selected and files are loaded
@@ -399,26 +398,41 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         if (!project) return;
         setIsAiLoading(true);
         setSidebarTab('chat');
-
+    
         const userMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'user', text: message };
         await addChatMessage(projectId, userMessage, dbInstance);
-
+    
+        let promptWithContext = message;
+    
+        if (mode === 'build' || mode === 'ask') {
+            const recentMessages = chatMessages.slice(-10).reverse();
+            const lastPinnedFileMessage = recentMessages.find(m => m.type === 'file_pin' && m.filePath);
+            
+            if (lastPinnedFileMessage) {
+                const file = files.find(f => f.path === lastPinnedFileMessage.filePath);
+                if (file && file.content !== undefined) {
+                    const contextHeader = `The user has pinned the file \`${file.path}\` in the chat. Its content is provided below for context. When formulating your response, assume the user might be referring to this file when they say "this", "it", etc.\n\n--- CONTENT OF ${file.path} ---\n${file.content}\n--- END OF CONTENT ---\n\nUser request: `;
+                    promptWithContext = contextHeader + message;
+                }
+            }
+        }
+    
         try {
             const key = apiConfig[project.provider];
             if (!key && !apiPoolConfig.isEnabled) throw new Error(`API key for ${project.provider} is not configured.`);
-
+    
             if (mode === 'general') {
                 const answer = await askGeneralQuestion(message, project.provider, project.model, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
                 await addAndParseAiMessage({ sender: 'ai', text: answer });
             } else if (mode === 'ask') {
-                const answer = await answerProjectQuestion(message, files, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
+                const answer = await answerProjectQuestion(promptWithContext, files, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
                 await addAndParseAiMessage({ sender: 'ai', text: answer });
             } else { // build mode
-                const plan = await generateModificationPlan(message, files, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
-                 if(plan.plan.special_action) {
+                const plan = await generateModificationPlan(promptWithContext, files, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
+                if (plan?.plan?.special_action) {
                     const { action, payload, confirmation_prompt } = plan.plan.special_action;
-                    if(window.confirm(confirmation_prompt || `Are you sure you want to perform the action: ${action}?`)) {
-                        switch(action) {
+                    if (window.confirm(confirmation_prompt || `Are you sure you want to perform the action: ${action}?`)) {
+                        switch (action) {
                             case 'DELETE_PROJECT':
                                 await deleteProject(projectId);
                                 onBackToDashboard();
@@ -1128,6 +1142,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                     </div>
                     <div className="h-full" style={{ display: mobileView === 'chat' ? 'block' : 'none' }}>
                         <ChatInterface messages={chatMessages} onSendMessage={handleSendMessage} isLoading={isAiLoading} onApprovePlan={handleApprovePlan} onRejectPlan={handleRejectPlan} projectMembers={projectMembers} currentUser={user} isOwner={isOwner} files={files} project={project} apiConfig={apiConfig} apiPoolConfig={apiPoolConfig} apiPoolKeys={apiPoolKeys} currentUserId={user.uid} onSendRichMessage={handleSendRichMessage} onDeleteMessage={(id) => deleteChatMessage(projectId, id, dbInstance)} onOpenFileFromPin={handleFileSelect} onUpdateTaskStatus={handleUpdateTaskStatus} chatMessageRefs={chatMessageRefs}/>
+                    </div>
+                    <div className="h-full" style={{ display: mobileView === 'todo' ? 'block' : 'none' }}>
+                        <TodoListPanel
+                            messages={chatMessages}
+                            onUpdateTaskStatus={handleUpdateTaskStatus}
+                            onJumpToMessage={handleJumpToMessage}
+                        />
                     </div>
                     <div className="h-full" style={{ display: mobileView === 'editor' ? 'block' : 'none' }}>
                         {selectedFile ? <CodeEditor filePath={selectedFile.path} content={selectedFile.content || ''} onChange={handleFileContentChange} onSave={handleSaveFile} isDirty={dirtyFiles.has(selectedFile.path)} isSavingFile={savingFile === selectedFile.path} isMobile onBack={() => setMobileView('files')} /> : <div className="p-4 text-center text-neutral">Select a file to edit.</div>}

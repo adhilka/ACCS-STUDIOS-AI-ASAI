@@ -112,10 +112,12 @@ const SnapshotsPanel: React.FC<{
 const Sidebar: React.FC<SidebarProps> = (props) => {
   const { activeTab, onTabChange, isCollaborationEnabled, snapshots, onCreateSnapshot, onDeleteSnapshot, isOwner } = props;
 
-  const tabClasses = (tab: Tab) => `flex-1 py-2 px-4 text-sm font-medium text-center cursor-pointer flex items-center justify-center gap-2 border-b-2 transition-colors ${
-    activeTab === tab 
-      ? 'border-primary text-base-content' 
-      : 'border-transparent text-neutral hover:bg-base-300'
+  const tabClasses = (tab: Tab, disabled: boolean = false) => `flex-1 py-2 px-4 text-sm font-medium text-center cursor-pointer flex items-center justify-center gap-2 border-b-2 transition-colors ${
+    disabled
+      ? 'border-transparent text-neutral/50 cursor-not-allowed'
+      : activeTab === tab 
+        ? 'border-primary text-base-content' 
+        : 'border-transparent text-neutral hover:bg-base-300'
   }`;
 
   return (
@@ -130,7 +132,13 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
          <button data-testid="godmode-sidebar-todo-tab" onClick={() => onTabChange('todo')} className={tabClasses('todo')}>
           <ChecklistIcon /> To-Do
         </button>
-        <button data-testid="godmode-sidebar-snapshots-tab" onClick={() => onTabChange('snapshots')} className={tabClasses('snapshots')}>
+        <button
+          data-testid="godmode-sidebar-snapshots-tab"
+          onClick={() => onTabChange('snapshots')}
+          disabled={!isCollaborationEnabled}
+          className={tabClasses('snapshots', !isCollaborationEnabled)}
+          title={!isCollaborationEnabled ? "Enable Collaboration in Project Settings to use Snapshots" : "Project Snapshots"}
+        >
           <SaveIcon /> Snapshots
         </button>
       </div>

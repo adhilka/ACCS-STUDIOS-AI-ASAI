@@ -46,9 +46,7 @@ export const getSecondaryFirebaseApp = (config: CustomFirebaseConfig, ownerUid: 
         return existingApp;
     }
 
-    // If not, initialize a new one. This config is for the user's personal Firebase project.
-    // FIX: Removed databaseURL from config as it is not needed for Firestore.
-    return firebase.initializeApp(
+    const newApp = firebase.initializeApp(
         {
             apiKey: config.apiKey,
             authDomain: config.authDomain,
@@ -56,6 +54,14 @@ export const getSecondaryFirebaseApp = (config: CustomFirebaseConfig, ownerUid: 
         },
         appName // Unique name for the app instance
     );
+
+    // Enable persistence on the new instance to improve offline resilience
+    newApp.firestore().enablePersistence({ synchronizeTabs: true })
+      .catch((err) => {
+        console.warn(`Firestore persistence for secondary app '${appName}' failed:`, err.message);
+      });
+
+    return newApp;
 };
 
 export default firebase;

@@ -107,7 +107,7 @@ async function callAiModel(
                 
                 let apiModel = model;
                 if (!apiModel) {
-                  apiModel = isGroq ? 'llama3-8b-8192' : 'mistralai/mistral-7b-instruct'; // Fallback
+                  apiModel = isGroq ? 'llama-3.1-8b-instant' : 'mistralai/mistral-7b-instruct'; // Fallback
                 }
 
                 const response = await fetch(endpoint, {
@@ -307,7 +307,8 @@ ${memoryFile.content}
 3.  The JSON object must have three keys: "thoughts", "reasoning", and "plan".
 4.  Do not list the same file path in multiple operations (e.g., do not both \`move\` and \`update\` the same source file in one plan). If you move a file to a new path, you cannot also update the content at that new path in the same plan.
 5.  Be proactive: Remember to use 'move' for renaming files and 'copy' for duplicating files when appropriate.
-6.  Your entire response must be ONLY this JSON object. Nothing else.
+6.  If you refer to a file path in your "thoughts" or "reasoning", you MUST wrap it in backticks, e.g., \`src/index.js\`.
+7.  Your entire response must be ONLY this JSON object. Nothing else.
 
 **Plan Schema:**
 The "plan" object can contain the following keys. All are optional.
@@ -629,7 +630,7 @@ export const answerProjectQuestion = async (
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<string> => {
      const projectJsonString = JSON.stringify(fileSystemToJSON(files), null, 2);
-    const fullPrompt = `${baseInstruction} You are a helpful AI assistant with expertise in software development. The user has a question about their project. Based on the files provided, answer their question.
+    const fullPrompt = `${baseInstruction} You are a helpful AI assistant with expertise in software development. The user has a question about their project. Based on the files provided, answer their question. If your answer contains any file paths, you MUST wrap them in backticks, for example: "You can find the relevant code in \`src/utils/api.ts\`.".
 
 **User's Question:** "${prompt}"
 
@@ -764,9 +765,22 @@ Generate the JSON plan now.`;
       }
     });
 
-    const rawPlan = await parseJsonResponse<Array<Omit<AiGodModeAction, 'reasoning'>>>(
+    let planArray = await parseJsonResponse<any>(
         architectResponse.text, 'gemini', apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id
     );
+
+    // The model sometimes wraps the array in an object. This handles that case.
+    if (!Array.isArray(planArray)) {
+        const arrayKey = Object.keys(planArray).find(key => Array.isArray(planArray[key]));
+        if (arrayKey) {
+            planArray = planArray[arrayKey];
+        } else {
+            throw new Error("God Mode planner did not return a valid plan array. The response was not iterable.");
+        }
+    }
+    
+    const rawPlan: Array<Omit<AiGodModeAction, 'reasoning'>> = planArray;
+
 
     // --- 3. ORCHESTRATION LOOP - Augment the plan with Coder and Reviewer ---
     for (const rawAction of rawPlan) {
@@ -798,8 +812,8 @@ Generate the JSON plan now.`;
             ---
             Generate the JSON response now.`;
 
-            const coderResultText = await callAiModel(coderPrompt, 'groq', apiConfig, 'llama3-8b-8192', userId, apiPoolConfig, apiPoolKeys, project.id);
-            const changes = await parseJsonResponse<AiChanges>(coderResultText, 'groq', apiConfig, 'llama3-8b-8192', userId, apiPoolConfig, apiPoolKeys, project.id);
+            const coderResultText = await callAiModel(coderPrompt, 'groq', apiConfig, 'llama-3.1-8b-instant', userId, apiPoolConfig, apiPoolKeys, project.id);
+            const changes = await parseJsonResponse<AiChanges>(coderResultText, 'groq', apiConfig, 'llama-3.1-8b-instant', userId, apiPoolConfig, apiPoolKeys, project.id);
             
             finalAction.payload = JSON.stringify(changes); // The executable payload
             godModeMemory.push(`Coder implemented file changes based on Architect's prompt.`);

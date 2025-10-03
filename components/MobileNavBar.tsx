@@ -1,7 +1,7 @@
 import React from 'react';
-import { CodeIcon, ChatBubbleIcon, PlayIcon, FolderIcon } from './icons';
+import { CodeIcon, ChatBubbleIcon, PlayIcon, FolderIcon, ChecklistIcon } from './icons';
 
-type MobileView = 'files' | 'chat' | 'editor' | 'preview';
+type MobileView = 'files' | 'chat' | 'todo' | 'editor' | 'preview';
 
 interface MobileNavBarProps {
   activeView: MobileView;
@@ -49,6 +49,13 @@ const MobileNavBar: React.FC<MobileNavBarProps> = ({ activeView, onViewChange, i
         icon={<ChatBubbleIcon />}
         isActive={activeView === 'chat'}
         onClick={() => onViewChange('chat')}
+      />
+      <NavItem
+        view="todo"
+        label="To-Do"
+        icon={<ChecklistIcon />}
+        isActive={activeView === 'todo'}
+        onClick={() => onViewChange('todo')}
       />
       <NavItem
         view="editor"

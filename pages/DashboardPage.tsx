@@ -37,10 +37,12 @@ const modelOptions = {
         { id: 'openai/gpt-3.5-turbo', name: 'OpenAI GPT-3.5 Turbo' },
     ],
     groq: [
-        { id: 'llama3-8b-8192', name: 'LLaMA3 8b' },
-        { id: 'llama3-70b-8192', name: 'LLaMA3 70b' },
+        { id: 'llama-3.1-8b-instant', name: 'LLaMA 3.1 8B (Fastest)' },
+        { id: 'llama-3.1-70b-versatile', name: 'LLaMA 3.1 70B (Powerful)' },
+        { id: 'gemma2-9b-it', name: 'Gemma 2 9B' },
         { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B' },
-        { id: 'gemma-7b-it', name: 'Gemma 7b' },
+        { id: 'llama3-70b-8192', name: 'LLaMA 3 70B' },
+        { id: 'llama3-8b-8192', name: 'LLaMA 3 8B' },
     ]
 };
 
