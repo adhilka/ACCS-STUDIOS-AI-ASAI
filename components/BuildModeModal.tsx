@@ -22,8 +22,8 @@ const BuildModeModal: React.FC<BuildModeModalProps> = ({ isOpen, onClose, onBuil
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300">
-      <form onSubmit={handleSubmit} className="bg-base-200 rounded-lg shadow-2xl p-8 w-full max-w-3xl m-4 border border-base-300 flex flex-col" style={{height: '70vh'}}>
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
+      <form onSubmit={handleSubmit} className="bg-base-200 rounded-lg shadow-2xl p-6 sm:p-8 w-full max-w-md sm:max-w-3xl border border-base-300 flex flex-col h-[80vh] sm:h-[70vh]">
         <div className='flex items-center gap-3 mb-4'>
             <AiIcon className="w-8 h-8 text-primary"/>
             <div>

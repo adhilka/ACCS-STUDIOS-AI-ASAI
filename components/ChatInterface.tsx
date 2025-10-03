@@ -204,6 +204,24 @@ const CodeSnippetMessage: React.FC<{ code: string; language: string; text: strin
     </div>
 );
 
+const TaskMessage: React.FC<{ message: AiChatMessage; onToggle: (isComplete: boolean) => void;}> = ({ message, onToggle }) => (
+    <div className="flex items-start gap-3 p-2 bg-base-100/50 rounded-md">
+      <input
+        type="checkbox"
+        checked={!!message.isComplete}
+        onChange={(e) => onToggle(e.target.checked)}
+        className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+      />
+      <div>
+        <p className={`text-sm ${message.isComplete ? 'line-through text-neutral' : 'text-base-content'}`}>
+          {message.taskText}
+        </p>
+        <p className="text-xs text-neutral/80 mt-1">
+            Task created by {message.senderInfo?.displayName || 'user'}
+        </p>
+      </div>
+    </div>
+);
 
 interface ChatInterfaceProps {
     messages: AiChatMessage[];
@@ -224,10 +242,12 @@ interface ChatInterfaceProps {
     onSendRichMessage: (messageData: Partial<Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>>) => void;
     onDeleteMessage: (messageId: string) => void;
     onOpenFileFromPin: (filePath: string) => void;
+    onUpdateTaskStatus: (messageId: string, isComplete: boolean) => void;
+    chatMessageRefs?: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
-    const { messages, onSendMessage, isLoading, onApprovePlan, onRejectPlan, projectMembers, currentUser, isOwner, files, project, apiConfig, apiPoolConfig, apiPoolKeys, onSendRichMessage, onDeleteMessage, onOpenFileFromPin } = props;
+    const { messages, onSendMessage, isLoading, onApprovePlan, onRejectPlan, projectMembers, currentUser, isOwner, files, project, apiConfig, apiPoolConfig, apiPoolKeys, onSendRichMessage, onDeleteMessage, onOpenFileFromPin, onUpdateTaskStatus, chatMessageRefs } = props;
     const [input, setInput] = useState('');
     const [mode, setMode] = useState<'build' | 'ask' | 'general'>('build');
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -276,6 +296,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                 })();
                 return;
             }
+            
+            if (text.startsWith('/task ')) {
+                const taskText = text.substring(6);
+                onSendRichMessage({
+                    type: 'task',
+                    text: `New task created: "${taskText}"`,
+                    taskText: taskText,
+                    isComplete: false,
+                });
+                setInput('');
+                return;
+            }
 
             if (isCollaborationEnabled()) {
                 const mentionedUsers = projectMembers.filter(m => text.includes(`@[${m.displayName}](${m.uid})`));
@@ -290,7 +322,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
     const isCollaborationEnabled = () => project?.members.length > 1;
 
     const placeholders = {
-        build: "Describe a change or type /snippet...",
+        build: "Describe a change or type /snippet, /task...",
         ask: "Ask a question about your project...",
         general: "Ask me anything...",
     }
@@ -330,6 +362,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                 return msg.filePath ? <FilePinMessage filePath={msg.filePath} onOpenFile={onOpenFileFromPin} /> : <MarkdownRenderer text={msg.text} members={projectMembers} />;
             case 'code_snippet':
                 return msg.code ? <CodeSnippetMessage code={msg.code} language={msg.language || ''} text={msg.text} members={projectMembers} /> : <MarkdownRenderer text={msg.text} members={projectMembers} />;
+            case 'task':
+                return <TaskMessage message={msg} onToggle={(isComplete) => onUpdateTaskStatus(msg.id, isComplete)} />;
             default: // 'text' and undefined
                 if (msg.isAgentMessage) {
                     return <AgentStatusMessage message={msg} members={projectMembers}/>;
@@ -376,7 +410,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                     const showHeader = !prevMsg || senderFor(prevMsg) !== senderFor(msg) || msg.sender === 'ai';
                     
                     return (
-                        <div key={msg.id} className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+// FIX: The ref callback should not return a value. Encapsulating the map 'set' operation in a block statement ensures it returns undefined.
+                        <div ref={el => { chatMessageRefs?.current.set(msg.id, el); }} key={msg.id} className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                             {msg.sender === 'ai' && (
                               <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white ${msg.isAgentMessage ? 'bg-secondary' : 'bg-accent'}`}>
                                 {msg.isAgentMessage ? <RobotIcon className="w-5 h-5" /> : <AiIcon className="w-5 h-5" />}
@@ -454,7 +489,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                                 handleSend(e);
                             }
                         }}
-                        placeholder={isCollaborationEnabled() ? "Type a message, @ to mention, or /snippet..." : placeholders[mode]}
+                        placeholder={isCollaborationEnabled() ? "Type a message, @mention, /snippet, or /task..." : placeholders[mode]}
                         className="w-full bg-base-200 border border-base-300/80 rounded-md py-2 pl-3 pr-10 text-base-content focus:outline-none focus:ring-2 focus:ring-primary resize-none max-h-40"
                         disabled={isLoading}
                     />

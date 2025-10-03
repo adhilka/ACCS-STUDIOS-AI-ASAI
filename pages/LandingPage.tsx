@@ -11,16 +11,11 @@ import {
   TargetIcon,
   FolderIcon,
   FileIcon,
-  RobotIcon,
-  MagicWandIcon,
-  BrainIcon,
   UsersIcon,
-  WrenchScrewdriverIcon,
   CommandLineIcon,
   CheckCircleIcon,
   XCircleIcon,
-  ChecklistIcon,
-  SaveIcon
+  ChecklistIcon
 } from '../components/icons';
 import { AiProvider } from '../types';
 
@@ -35,17 +30,6 @@ const useCases = {
     Teams: { icon: UsersIcon, title: 'Collaborate in Real-Time', text: 'Bring your team together on a self-hosted, secure server. See changes live, communicate with a feature-rich chat, and manage project history with snapshots.' },
     'Indie Hackers': { icon: RocketIcon, title: 'Launch Your MVP Faster', text: 'Go from idea to a minimum viable product in record time. Collaborate with a co-founder and validate your vision with a functional app, not just mockups.' },
 };
-
-const features = [
-  { icon: RobotIcon, title: 'Autonomous Development', text: "Give the AI a high-level objective and watch it plan, code, analyze, and self-correct to complete the task." },
-  { icon: UsersIcon, title: 'Real-time Collaboration', text: "Code together in real-time. Invite your team and see every change mirrored instantly on your own secure server." },
-  { icon: ChatBubbleIcon, title: 'Rich Team Chat', text: "Go beyond code. Mention teammates, pin files, share and generate code snippets, and manage tasks with a built-in to-do list." },
-  { icon: SaveIcon, title: 'Version Control (Snapshots)', text: "Experiment without fear. Create a snapshot of your project at any point and revert back to a previous version instantly." },
-  { icon: PlayIcon, title: 'Live Sandbox Preview', text: "Instantly preview your application in a live, interactive StackBlitz environment right inside the editor." },
-  { icon: BrainIcon, title: 'Multi-Provider AI', text: "Choose the best AI for the job. Seamlessly switch between Gemini, Groq, and a wide range of models via OpenRouter." },
-  { icon: WrenchScrewdriverIcon, title: 'AI-Powered Debugging', text: "Describe a bug or issue, and let the AI analyze your code, propose a working fix, and apply it with your approval." },
-  { icon: RocketIcon, title: 'One-Click Deployment', text: "Deploy your project directly to CodeSandbox with a single click, with more providers like Netlify coming soon." },
-];
 
 const steps = [
   { icon: ChatBubbleIcon, title: '1. Prompt', text: 'Describe a new feature or a change in plain English using our Chat or Build modes.' },
@@ -272,25 +256,25 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStartBuilding, onSignInClic
               Build, collaborate, and deploy with an autonomous AI partner. From real-time co-editing to version snapshots, ASAI is engineered for teams and professional developers.
             </p>
             <div className="mt-10 max-w-2xl mx-auto scroll-animate" style={{ transitionDelay: '0.3s' }}>
-                 <form onSubmit={handleSubmit} className="relative">
+                 <form onSubmit={handleSubmit} className="relative flex flex-col gap-4 sm:gap-0">
                     <textarea
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         placeholder="Describe your application idea..."
                         rows={3}
-                        className="w-full pl-6 pr-48 py-4 text-lg bg-base-200 border border-base-300 rounded-lg text-base-content placeholder-neutral focus:ring-2 focus:ring-accent focus:outline-none transition resize-none"
+                        className="w-full pl-6 pr-4 sm:pr-48 py-4 text-lg bg-base-200 border border-base-300 rounded-lg text-base-content placeholder-neutral focus:ring-2 focus:ring-accent focus:outline-none transition resize-none"
                     />
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                    <div className="sm:absolute right-4 top-1/2 sm:-translate-y-1/2 flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
                         <select
                             value={provider}
                             onChange={e => setProvider(e.target.value as AiProvider)}
-                            className="bg-base-200 border border-base-300 rounded-md h-10 px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-accent transition-colors hover:bg-base-300"
+                            className="w-full sm:w-auto bg-base-200 border border-base-300 rounded-md h-10 px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-accent transition-colors hover:bg-base-300"
                         >
                             <option value="gemini">Gemini</option>
                             <option value="openrouter">OpenRouter</option>
                             <option value="groq">Groq</option>
                         </select>
-                        <button type="submit" className="group btn-shine h-10 w-10 inline-flex items-center justify-center bg-gradient-to-r from-accent to-secondary text-white font-bold rounded-md overflow-hidden transition-transform duration-300 hover:scale-105 shadow-lg shadow-accent/20 disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed" disabled={!prompt.trim()}>
+                        <button type="submit" className="group btn-shine h-10 w-full sm:w-10 inline-flex items-center justify-center bg-gradient-to-r from-accent to-secondary text-white font-bold rounded-md overflow-hidden transition-transform duration-300 hover:scale-105 shadow-lg shadow-accent/20 disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed" disabled={!prompt.trim()}>
                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"></path></svg>
                         </button>
                     </div>
@@ -300,24 +284,6 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStartBuilding, onSignInClic
           <MockEditor />
         </main>
       </div>
-      
-      <Section id="features">
-        <SectionTitle subtitle="ASAI is more than a code generator; it's a collaborative environment where you and your team build with an autonomous partner.">
-            A Smarter Way to Build
-        </SectionTitle>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {features.map((feature, i) => (
-                <div key={feature.title} className="relative p-6 rounded-xl bg-base-200 overflow-hidden group scroll-animate border border-base-300" style={{ transitionDelay: `${0.3 + i*0.1}s`}}>
-                    <div className="absolute -inset-px rounded-xl bg-gradient-to-r from-accent to-secondary opacity-0 group-hover:opacity-70 transition-opacity duration-300"/>
-                    <div className="relative">
-                        <div className="mb-4 text-accent"><feature.icon className="w-10 h-10"/></div>
-                        <h3 className="font-bold text-lg mb-2 text-base-content">{feature.title}</h3>
-                        <p className="text-neutral text-sm">{feature.text}</p>
-                    </div>
-                </div>
-            ))}
-        </div>
-      </Section>
       
       <Section id="collaboration" className="bg-base-200/50">
         <SectionTitle subtitle="Go beyond solo development. ASAI provides the tools for seamless teamwork, all on your own infrastructure.">

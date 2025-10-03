@@ -106,8 +106,8 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
 
   return (
     <>
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300">
-      <div className="bg-base-200 rounded-lg shadow-2xl p-8 w-full max-w-2xl m-4 border border-base-300 max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
+      <div className="bg-base-200 rounded-lg shadow-2xl p-6 sm:p-8 w-full max-w-md sm:max-w-2xl border border-base-300 max-h-[90vh] flex flex-col">
         <h2 className="text-2xl font-bold mb-4 text-base-content">Project Settings</h2>
         
         <div className="border-b border-base-300 mb-6">
@@ -244,16 +244,16 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
                                  <button onClick={() => setInviteCode(null)} className="text-xs text-primary hover:underline mt-2">Generate another invite</button>
                              </div>
                          ) : (
-                             <div className="flex items-center gap-2">
+                             <div className="flex flex-col sm:flex-row items-center gap-2">
                                 <input
                                    type="email"
                                    value={inviteEmail}
                                    onChange={(e) => setInviteEmail(e.target.value)}
                                    placeholder="Enter member's email address"
-                                   className="flex-grow bg-base-100 border border-base-300 rounded-md py-2 px-3 text-sm"
+                                   className="flex-grow w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-sm"
                                    disabled={isInviting}
                                 />
-                                <button onClick={handleGenerateInvite} disabled={isInviting || !inviteEmail.trim()} className="px-4 py-2 bg-primary text-white font-semibold rounded-md text-sm w-48 flex justify-center items-center">
+                                <button onClick={handleGenerateInvite} disabled={isInviting || !inviteEmail.trim()} className="w-full sm:w-48 px-4 py-2 bg-primary text-white font-semibold rounded-md text-sm flex justify-center items-center">
                                    {isInviting ? <Spinner size="sm" /> : 'Generate Invite Code'}
                                 </button>
                              </div>

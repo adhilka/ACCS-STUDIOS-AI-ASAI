@@ -94,7 +94,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const [consoleMessages, setConsoleMessages] = useState<ConsoleMessage[]>([]);
     const [agentState, setAgentState] = useState<AgentState>({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] });
     const [isGeneratingInitialProject, setIsGeneratingInitialProject] = useState(false);
-    const [sidebarTab, setSidebarTab] = useState<'files' | 'chat' | 'snapshots'>('files');
+    const [sidebarTab, setSidebarTab] = useState<'files' | 'chat' | 'snapshots' | 'todo'>('files');
     const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
     const [savingFile, setSavingFile] = useState<string | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string } | null>(null);
@@ -107,6 +107,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const [godModeActionQueue, setGodModeActionQueue] = useState<AiGodModeAction[]>([]);
     const [currentGodModeAction, setCurrentGodModeAction] = useState<AiGodModeAction | null>(null);
     const [isGodModeActive, setIsGodModeActive] = useState(false);
+    
+    const chatMessageRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
     const isOwner = user?.uid === project?.ownerId;
     const isMobile = useMediaQuery('(max-width: 1023px)');
@@ -128,6 +130,40 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const isResizingSidebar = useRef(false);
     const isResizingVertical = useRef(false);
     const isResizingMain = useRef(false);
+
+    const findFileMentions = (text: string, projectFiles: FileNode[]): string[] => {
+        if (!text) return [];
+        const filePaths = projectFiles.map(f => f.path);
+        const foundPaths = new Set<string>();
+
+        filePaths.sort((a, b) => b.length - a.length);
+
+        for (const path of filePaths) {
+            if (text.includes(path)) {
+              foundPaths.add(path);
+            }
+        }
+        return Array.from(foundPaths);
+    };
+    
+    const addAndParseAiMessage = async (message: Omit<AiChatMessage, 'id' | 'timestamp'>) => {
+        await addChatMessage(projectId, message, dbInstance);
+        
+        if (message.text && message.sender === 'ai') {
+            const mentionedFiles = findFileMentions(message.text, files);
+            
+            for (const path of mentionedFiles) {
+                 await addChatMessage(projectId, {
+                    sender: 'ai',
+                    type: 'file_pin',
+                    filePath: path,
+                    text: `Reference to \`${path}\``,
+                    ...(message.isAgentMessage && { isAgentMessage: true })
+                }, dbInstance);
+            }
+        }
+    };
+
 
     useEffect(() => {
         // This effect handles the DB instance logic and data migration if needed
@@ -274,7 +310,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
             const onAgentMessage = async (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => {
                 const agentMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'ai', isAgentMessage: true, ...message };
-                await addChatMessage(projectId, agentMessage, dbInstance);
+                await addAndParseAiMessage(agentMessage);
             };
 
             try {
@@ -309,7 +345,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 setSidebarTab('files');
             } catch (err) {
                 const message = err instanceof Error ? err.message : "An unknown error occurred during project generation.";
-                await addChatMessage(projectId, { sender: 'ai', text: `Sorry, I ran into a problem: ${message}` }, dbInstance);
+                await addAndParseAiMessage({ sender: 'ai', text: `Sorry, I ran into a problem: ${message}` });
                 setSidebarTab('files');
             } finally {
                 setIsAiLoading(false);
@@ -373,10 +409,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
             if (mode === 'general') {
                 const answer = await askGeneralQuestion(message, project.provider, project.model, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
-                await addChatMessage(projectId, { sender: 'ai', text: answer }, dbInstance);
+                await addAndParseAiMessage({ sender: 'ai', text: answer });
             } else if (mode === 'ask') {
                 const answer = await answerProjectQuestion(message, files, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
-                await addChatMessage(projectId, { sender: 'ai', text: answer }, dbInstance);
+                await addAndParseAiMessage({ sender: 'ai', text: answer });
             } else { // build mode
                 const plan = await generateModificationPlan(message, files, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
                  if(plan.plan.special_action) {
@@ -390,7 +426,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                             case 'COPY_PROJECT':
                                 const newProjectId = await copyProject(projectId, payload?.newName || `${project.name} Copy`, user.uid);
                                 await addChatMessage(newProjectId, { sender: 'ai', text: `This project was copied from ${project.name}.` });
-                                await addChatMessage(projectId, { sender: 'ai', text: `Project successfully copied. The new project is named "${payload?.newName || `${project.name} Copy`}".` }, dbInstance);
+                                await addAndParseAiMessage({ sender: 'ai', text: `Project successfully copied. The new project is named "${payload?.newName || `${project.name} Copy`}".` });
                                 break;
                             case 'RENAME_PROJECT':
                                 if (payload?.newName) {
@@ -408,7 +444,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-            await addChatMessage(projectId, { sender: 'ai', text: `Sorry, I ran into a problem: ${errorMessage}` }, dbInstance);
+            await addAndParseAiMessage({ sender: 'ai', text: `Sorry, I ran into a problem: ${errorMessage}` });
         } finally {
             setIsAiLoading(false);
         }
@@ -454,12 +490,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             }
             
             await updateChatMessage(projectId, messageId, { planStatus: 'approved' }, dbInstance);
-            await addChatMessage(projectId, { sender: 'ai', text: "I have successfully applied the changes." }, dbInstance);
+            await addAndParseAiMessage({ sender: 'ai', text: "I have successfully applied the changes." });
 
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during execution.";
             await updateChatMessage(projectId, messageId, { planStatus: 'pending' }, dbInstance); // Revert status
-            await addChatMessage(projectId, { sender: 'ai', text: `I encountered an error while applying the changes: ${errorMessage}` }, dbInstance);
+            await addAndParseAiMessage({ sender: 'ai', text: `I encountered an error while applying the changes: ${errorMessage}` });
         } finally {
             setIsAiLoading(false);
         }
@@ -467,6 +503,38 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     
     const handleRejectPlan = async (messageId: string) => {
         await updateChatMessage(projectId, messageId, { planStatus: 'rejected' }, dbInstance);
+    };
+    
+    const handleUpdateTaskStatus = async (messageId: string, isComplete: boolean) => {
+        if (!project) return;
+        try {
+            await updateChatMessage(projectId, messageId, { isComplete }, dbInstance);
+        } catch (error) {
+            console.error("Failed to update task status:", error);
+            alert("Could not update task.");
+        }
+    };
+
+    const handleJumpToMessage = (messageId: string) => {
+        const element = chatMessageRefs.current.get(messageId);
+        if (element) {
+            if (isMobile) {
+                setMobileView('chat');
+                // On mobile, the view needs to switch before we can scroll
+                setTimeout(() => {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 100);
+            } else {
+                setSidebarTab('chat');
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            // Highlight the message briefly
+            element.style.transition = 'background-color 0.5s ease';
+            element.style.backgroundColor = 'var(--color-primary-focus, #3a82f6)';
+            setTimeout(() => {
+                element.style.backgroundColor = '';
+            }, 1500);
+        }
     };
 
     const handleDownload = async () => {
@@ -508,10 +576,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         await addChatMessage(projectId, userMessage, dbInstance);
         try {
             const analysis = await analyzeCode(files, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
-            await addChatMessage(projectId, { sender: 'ai', text: analysis }, dbInstance);
+            await addAndParseAiMessage({ sender: 'ai', text: analysis });
         } catch(err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during analysis.";
-            await addChatMessage(projectId, { sender: 'ai', text: `Sorry, I ran into a problem during analysis: ${errorMessage}` }, dbInstance);
+            await addAndParseAiMessage({ sender: 'ai', text: `Sorry, I ran into a problem during analysis: ${errorMessage}` });
         } finally {
             setIsAiLoading(false);
         }
@@ -564,7 +632,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         
         const onAgentMessage = async (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => {
             const agentMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'ai', isAgentMessage: true, ...message };
-            await addChatMessage(projectId, agentMessage, dbInstance);
+            await addAndParseAiMessage(agentMessage);
         };
         
         const handleAgentStateChange = (stateUpdate: Partial<AgentState>) => {
@@ -580,19 +648,16 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         try {
             const finalFiles = await runAutonomousAgent(objective, files, project, apiConfig, handleAgentStateChange, onAgentMessage, user.uid, apiPoolConfig, apiPoolKeys);
             
-            const finalFileMap = new Map(finalFiles.map(f => [f.path, f]));
-            const initialFileMap = new Map(files.map(f => [f.path, f]));
+            const finalFileMap: Map<string, FileNode> = new Map(finalFiles.map(f => [f.path, f]));
+            const initialFileMap: Map<string, FileNode> = new Map(files.map(f => [f.path, f]));
             const changes: AiChanges = { create: {}, update: {}, delete: [] };
 
-            // FIX: The for...of loop over map entries was causing type inference issues with `file` being `unknown`. Reverting to a forEach loop which correctly infers the types for `file` and `path`.
-            // Re-FIX: Iterating over file arrays directly to resolve persistent type inference issues with Map iterators.
-            
             // Detect creations and updates
-            // FIX: Explicitly type `file` as `FileNode` to resolve type inference issue.
             finalFiles.forEach((file: FileNode) => {
                 const initialFile = initialFileMap.get(file.path);
                 if (!initialFile) {
                     changes.create![file.path] = file.content || '';
+// FIX: The type of `initialFile` was being inferred as `unknown`, preventing access to `.content`. Explicitly typing `initialFileMap` as `Map<string, FileNode>` ensures `initialFile` is correctly typed as `FileNode | undefined`, allowing safe access to its properties.
                 } else if (initialFile.content !== file.content) {
                     changes.update![file.path] = file.content || '';
                 }
@@ -606,11 +671,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             });
 
             await applyAiChanges(projectId, files, changes, dbInstance);
-             await addChatMessage(projectId, { sender: 'ai', text: "Autonomous agent has completed the objective." }, dbInstance);
+             await addAndParseAiMessage({ sender: 'ai', text: "Autonomous agent has completed the objective." });
 
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-             await addChatMessage(projectId, { sender: 'ai', text: `Agent stopped due to an error: ${errorMessage}` }, dbInstance);
+             await addAndParseAiMessage({ sender: 'ai', text: `Agent stopped due to an error: ${errorMessage}` });
         } finally {
             setIsAiLoading(false);
         }
@@ -645,8 +710,22 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                     }
                     break;
                 case 'MODIFY_FILES':
-                    if (action.payload && typeof action.payload === 'object') {
-                        await applyAiChanges(projectId, files, action.payload as AiChanges, dbInstance);
+                    if (action.payload) {
+                        let changes: AiChanges;
+                        if (typeof action.payload === 'string') {
+                            try {
+                                changes = JSON.parse(action.payload);
+                            } catch (e) {
+                                const message = e instanceof Error ? e.message : 'Unknown parsing error';
+                                throw new Error(`Failed to parse MODIFY_FILES payload: ${message}`);
+                            }
+                        } else if (typeof action.payload === 'object') {
+                            // This is a fallback in case the AI returns an object directly
+                            changes = action.payload as AiChanges;
+                        } else {
+                            throw new Error('Invalid payload type for MODIFY_FILES. Expected a JSON string or an object.');
+                        }
+                        await applyAiChanges(projectId, files, changes, dbInstance);
                     }
                     break;
                 case 'ASK_USER':
@@ -1048,7 +1127,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                         <FileExplorer files={files} selectedFilePath={selectedFilePath} onFileSelect={handleFileSelect} onFileDelete={handleFileDelete} onFileAdd={handleFileAdd} onFileUpload={handleFileUpload} onContextMenuRequest={handleContextMenuRequest} />
                     </div>
                     <div className="h-full" style={{ display: mobileView === 'chat' ? 'block' : 'none' }}>
-                        <ChatInterface messages={chatMessages} onSendMessage={handleSendMessage} isLoading={isAiLoading} onApprovePlan={handleApprovePlan} onRejectPlan={handleRejectPlan} projectMembers={projectMembers} currentUser={user} isOwner={isOwner} files={files} project={project} apiConfig={apiConfig} apiPoolConfig={apiPoolConfig} apiPoolKeys={apiPoolKeys} currentUserId={user.uid} onSendRichMessage={handleSendRichMessage} onDeleteMessage={(id) => deleteChatMessage(projectId, id, dbInstance)} onOpenFileFromPin={handleFileSelect}/>
+                        <ChatInterface messages={chatMessages} onSendMessage={handleSendMessage} isLoading={isAiLoading} onApprovePlan={handleApprovePlan} onRejectPlan={handleRejectPlan} projectMembers={projectMembers} currentUser={user} isOwner={isOwner} files={files} project={project} apiConfig={apiConfig} apiPoolConfig={apiPoolConfig} apiPoolKeys={apiPoolKeys} currentUserId={user.uid} onSendRichMessage={handleSendRichMessage} onDeleteMessage={(id) => deleteChatMessage(projectId, id, dbInstance)} onOpenFileFromPin={handleFileSelect} onUpdateTaskStatus={handleUpdateTaskStatus} chatMessageRefs={chatMessageRefs}/>
                     </div>
                     <div className="h-full" style={{ display: mobileView === 'editor' ? 'block' : 'none' }}>
                         {selectedFile ? <CodeEditor filePath={selectedFile.path} content={selectedFile.content || ''} onChange={handleFileContentChange} onSave={handleSaveFile} isDirty={dirtyFiles.has(selectedFile.path)} isSavingFile={savingFile === selectedFile.path} isMobile onBack={() => setMobileView('files')} /> : <div className="p-4 text-center text-neutral">Select a file to edit.</div>}
@@ -1076,7 +1155,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />
                 <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} projectId={projectId} onGenerateKey={handleGenerateShareKey} isCollaborationEnabled={isCollaborationEnabled} ownerUid={project.ownerId} />
                 <DeploymentModal isOpen={isDeploymentModalOpen} onClose={() => setIsDeploymentModalOpen(false)} onDeployCodeSandbox={()=>{}} isDeploying={isDeploying} />
-                 <SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading}/>
+                 {/* FIX: Pass the 'project' prop to SvgDesignModal as it is required. */}
+<SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading} project={project}/>
                 <GodModeModal isOpen={isGodModeModalOpen} onClose={() => setIsGodModeModalOpen(false)} onStart={handleStartGodMode} isLoading={isAiLoading} apiConfig={apiConfig} />
                 {isFullScreenPreview && <SandboxPreview files={files} projectType={project.type} isFullScreen onCloseFullScreen={() => setIsFullScreenPreview(false)} />}
                 {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenuItems} onClose={() => setContextMenu(null)} />}
@@ -1134,6 +1214,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                         snapshots={snapshots}
                         onCreateSnapshot={handleCreateSnapshot}
                         onDeleteSnapshot={handleDeleteSnapshot}
+                        onUpdateTaskStatus={handleUpdateTaskStatus}
+                        chatMessageRefs={chatMessageRefs}
+                        onJumpToMessage={handleJumpToMessage}
                     />
                 </div>
                  <div onMouseDown={() => {isResizingSidebar.current = true; document.body.style.cursor = 'col-resize';}} className="w-1.5 h-full cursor-col-resize bg-base-300 hover:bg-primary transition-colors shrink-0"></div>
@@ -1187,7 +1270,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />
             <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} projectId={projectId} onGenerateKey={handleGenerateShareKey} isCollaborationEnabled={isCollaborationEnabled} ownerUid={project.ownerId} />
             <DeploymentModal isOpen={isDeploymentModalOpen} onClose={() => setIsDeploymentModalOpen(false)} onDeployCodeSandbox={()=>{}} isDeploying={isDeploying} />
-            <SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading}/>
+            {/* FIX: Pass the 'project' prop to SvgDesignModal as it is required. */}
+<SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading} project={project} />
             <GodModeModal isOpen={isGodModeModalOpen} onClose={() => setIsGodModeModalOpen(false)} onStart={handleStartGodMode} isLoading={isAiLoading} apiConfig={apiConfig} />
             {isFullScreenPreview && <SandboxPreview files={files} projectType={project.type} isFullScreen onCloseFullScreen={() => setIsFullScreenPreview(false)} />}
             {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenuItems} onClose={() => setContextMenu(null)} />}

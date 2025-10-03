@@ -11,6 +11,7 @@ import ProfileSettingsModal from '../components/ProfileSettingsModal';
 import AdminPanelModal from '../components/AdminPanelModal';
 import { auth } from '../services/firebase';
 import { formatTokens } from '../utils/formatters';
+import ThemeToggle from '../components/ThemeToggle';
 
 
 interface DashboardProps {
@@ -71,7 +72,7 @@ const NewProjectBuilder: React.FC<{ onStartBuilding: (prompt: string, provider: 
                     onChange={e => setPrompt(e.target.value)}
                     rows={3}
                     placeholder="e.g., A pomodoro timer with a customizable work/break cycle..."
-                    className="w-full bg-base-100/70 border border-base-300 rounded-md py-3 px-4 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"
+                    className="w-full bg-base-300 border border-base-300/50 rounded-md py-3 px-4 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"
                     disabled={isLoading}
                 />
                 <div className="flex flex-col sm:flex-row items-start gap-4">
@@ -132,7 +133,7 @@ const JoinProject: React.FC<{ onJoin: (key: string) => Promise<void> }> = ({ onJ
                     value={key}
                     onChange={e => setKey(e.target.value)}
                     placeholder="Enter share key or invite code..."
-                    className="flex-grow bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary"
+                    className="flex-grow bg-base-300 border border-base-300/50 rounded-md py-2 px-3 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary"
                     disabled={isLoading}
                 />
                 <button
@@ -334,19 +335,9 @@ const DashboardPage: React.FC<DashboardProps> = ({
                         {isCreating && <AiTypingIndicator />}
                     </div>
                     <div className="flex items-center gap-2">
-                         <button onClick={onShowDocs} className="p-2 rounded-full hover:bg-base-300 transition-colors" title="Documentation">
-                            <InformationCircleIcon className="w-5 h-5 text-neutral" />
-                        </button>
-                        {user.isAdmin && (
-                            <button onClick={openAdminPanel} className="p-2 rounded-full hover:bg-base-300 transition-colors" title="Admin Panel">
-                                <SettingsIcon className="w-5 h-5 text-neutral" />
-                            </button>
-                        )}
-                        <button onClick={() => setIsApiKeyModalOpen(true)} className="p-2 rounded-full hover:bg-base-300 transition-colors" title="API Key Settings">
-                            <KeyIcon className="w-5 h-5 text-neutral" />
-                        </button>
-                         <div className="relative" ref={userMenuRef}>
-                            <button onClick={() => setIsUserMenuOpen(prev => !prev)} className="flex items-center gap-2 p-1 rounded-full hover:bg-base-300" title="Profile Settings">
+                        <ThemeToggle />
+                        <div className="relative" ref={userMenuRef}>
+                             <button onClick={() => setIsUserMenuOpen(prev => !prev)} className="flex items-center gap-2 p-1 rounded-full hover:bg-base-300" title="Profile Settings">
                                 <span className="text-sm text-neutral hidden sm:inline">{user.displayName || user.email}</span>
                                  {user.photoURL ? (
                                      <img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full object-cover"/>
@@ -365,6 +356,27 @@ const DashboardPage: React.FC<DashboardProps> = ({
                                         Profile Settings
                                     </button>
                                     <button
+                                        onClick={() => { setIsApiKeyModalOpen(true); setIsUserMenuOpen(false); }}
+                                        className="w-full text-left px-4 py-2 text-sm text-base-content hover:bg-base-300"
+                                    >
+                                        API Key Settings
+                                    </button>
+                                    {user.isAdmin && (
+                                         <button
+                                            onClick={() => { openAdminPanel(); setIsUserMenuOpen(false); }}
+                                            className="w-full text-left px-4 py-2 text-sm text-base-content hover:bg-base-300"
+                                        >
+                                            Admin Panel
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => { onShowDocs(); setIsUserMenuOpen(false); }}
+                                        className="w-full text-left px-4 py-2 text-sm text-base-content hover:bg-base-300"
+                                    >
+                                        Documentation
+                                    </button>
+                                    <div className="h-px bg-base-300 my-1"></div>
+                                    <button
                                         onClick={() => auth.signOut()}
                                         className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-base-300"
                                     >
@@ -373,7 +385,7 @@ const DashboardPage: React.FC<DashboardProps> = ({
                                 </div>
                             )}
                          </div>
-                    </div>
+                     </div>
                 </div>
             </header>
             <main className="p-4 sm:p-8 max-w-7xl mx-auto">

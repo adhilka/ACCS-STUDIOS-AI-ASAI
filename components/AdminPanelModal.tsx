@@ -122,8 +122,8 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300">
-      <div className="bg-base-200 rounded-lg shadow-2xl p-8 w-full max-w-5xl m-4 border border-base-300 flex flex-col" style={{height: '90vh'}}>
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
+      <div className="bg-base-200 rounded-lg shadow-2xl p-6 sm:p-8 w-full max-w-sm sm:max-w-xl md:max-w-3xl lg:max-w-5xl border border-base-300 flex flex-col h-[90vh]">
         <h2 className="text-2xl font-bold mb-2 text-base-content">Admin Panel</h2>
         <p className="text-sm text-neutral mb-6">Manage global settings, API keys, and users.</p>
         
@@ -199,8 +199,8 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 </div>
                  <div>
                     <h3 className="font-semibold text-lg mb-2">Add New Key to Pool</h3>
-                    <div className="flex gap-2">
-                        <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as AiProvider)} className="bg-base-100 border border-base-300 rounded-md px-3 text-sm focus:outline-none">
+                    <div className="flex flex-col sm:flex-row gap-2">
+                        <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as AiProvider)} className="w-full sm:w-auto bg-base-100 border border-base-300 rounded-md px-3 h-10 text-sm focus:outline-none">
                             {providers.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
                         </select>
                         <input
@@ -210,7 +210,7 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             placeholder="Paste new API key here..."
                             className="flex-grow bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
                         />
-                        <button onClick={handleAddKey} className="px-4 py-2 bg-primary hover:opacity-90 rounded-md text-white font-semibold transition-colors">
+                        <button onClick={handleAddKey} className="w-full sm:w-auto px-4 py-2 bg-primary hover:opacity-90 rounded-md text-white font-semibold transition-colors">
                             Add Key
                         </button>
                     </div>
@@ -245,56 +245,58 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
             </div>
         )}
         {activeTab === 'users' && (
-             <div className="flex-grow overflow-y-auto bg-base-100 rounded-lg border border-base-300">
+             <div className="flex-grow overflow-auto bg-base-100 rounded-lg border border-base-300">
                  {users.length === 0 ? (
                     <p className="text-sm text-neutral text-center py-8">No user data available.</p>
                  ) : (
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-base-300/50 sticky top-0">
-                            <tr>
-                                <th className="p-3">Email</th>
-                                <th className="p-3">Token Balance</th>
-                                <th className="p-3">Signed Up</th>
-                                <th className="p-3 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {users.map(user => (
-                                <tr key={user.uid} className="border-b border-base-300">
-                                    <td className="p-3">{user.email}</td>
-                                    <td className="p-3 font-mono">
-                                        {editingUserId === user.uid ? (
-                                            <input 
-                                                type="number" 
-                                                value={editTokenValue} 
-                                                onChange={e => setEditTokenValue(e.target.value)} 
-                                                className="bg-base-300 rounded px-2 py-1 w-32"
-                                            />
-                                        ) : (
-                                            formatTokens(user.tokenBalance || 0)
-                                        )}
-                                    </td>
-                                    <td className="p-3">{user.createdAt?.toDate().toLocaleDateString()}</td>
-                                    <td className="p-3 text-right">
-                                        {editingUserId === user.uid ? (
-                                            <div className="flex gap-2 justify-end">
-                                                <button onClick={handleSaveUserTokens} className="p-1.5 hover:bg-green-500/20 rounded-md" title="Save">
-                                                    <CheckIcon className="w-4 h-4 text-green-500"/>
-                                                </button>
-                                                <button onClick={() => setEditingUserId(null)} className="p-1.5 hover:bg-base-300 rounded-md" title="Cancel">
-                                                    <span className="text-xs">X</span>
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <button onClick={() => handleEditUser(user)} className="text-xs text-primary hover:underline">
-                                                Edit Tokens
-                                            </button>
-                                        )}
-                                    </td>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-base-300/50 sticky top-0">
+                                <tr>
+                                    <th className="p-3">Email</th>
+                                    <th className="p-3">Token Balance</th>
+                                    <th className="p-3">Signed Up</th>
+                                    <th className="p-3 text-right">Actions</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                {users.map(user => (
+                                    <tr key={user.uid} className="border-b border-base-300">
+                                        <td className="p-3 whitespace-nowrap">{user.email}</td>
+                                        <td className="p-3 font-mono whitespace-nowrap">
+                                            {editingUserId === user.uid ? (
+                                                <input 
+                                                    type="number" 
+                                                    value={editTokenValue} 
+                                                    onChange={e => setEditTokenValue(e.target.value)} 
+                                                    className="bg-base-300 rounded px-2 py-1 w-32"
+                                                />
+                                            ) : (
+                                                formatTokens(user.tokenBalance || 0)
+                                            )}
+                                        </td>
+                                        <td className="p-3 whitespace-nowrap">{user.createdAt?.toDate().toLocaleDateString()}</td>
+                                        <td className="p-3 text-right whitespace-nowrap">
+                                            {editingUserId === user.uid ? (
+                                                <div className="flex gap-2 justify-end">
+                                                    <button onClick={handleSaveUserTokens} className="p-1.5 hover:bg-green-500/20 rounded-md" title="Save">
+                                                        <CheckIcon className="w-4 h-4 text-green-500"/>
+                                                    </button>
+                                                    <button onClick={() => setEditingUserId(null)} className="p-1.5 hover:bg-base-300 rounded-md" title="Cancel">
+                                                        <span className="text-xs">X</span>
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button onClick={() => handleEditUser(user)} className="text-xs text-primary hover:underline">
+                                                    Edit Tokens
+                                                </button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                  )}
             </div>
         )}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { DownloadIcon, KeyIcon, CodeIcon, SettingsIcon, UndoIcon, RedoIcon, AnalyzeIcon, AiIcon, RobotIcon, WrenchScrewdriverIcon, ArrowLeftIcon, PlayIcon, UserIcon, ShareIcon, CommandLineIcon, RocketIcon, ExternalLinkIcon, PaintBrushIcon, CrownIcon } from './icons';
+import { DownloadIcon, KeyIcon, CodeIcon, SettingsIcon, UndoIcon, RedoIcon, AnalyzeIcon, AiIcon, RobotIcon, WrenchScrewdriverIcon, ArrowLeftIcon, UserIcon, ShareIcon, CommandLineIcon, RocketIcon, ExternalLinkIcon, PaintBrushIcon, CrownIcon, ComputerDesktopIcon } from './icons';
 import { User } from '../types';
 import { auth } from '../services/firebase';
 import { useBranding } from '../contexts/BrandingContext';
@@ -96,7 +96,7 @@ const Header: React.FC<HeaderProps> = ({
         <CommandLineIcon className="w-5 h-5 text-neutral" />
       </button>
       <button onClick={onTogglePreview} className="p-2 rounded-md hover:bg-base-300 transition-colors" title="Toggle Preview Panel">
-        <PlayIcon className="w-5 h-5 text-neutral" />
+        <ComputerDesktopIcon className="w-5 h-5 text-neutral" />
       </button>
       <button onClick={onToggleFullScreenPreview} className="p-2 rounded-md hover:bg-base-300 transition-colors" title="Full Screen Preview">
         <ExternalLinkIcon className="w-5 h-5 text-neutral" />
@@ -158,7 +158,7 @@ const Header: React.FC<HeaderProps> = ({
         <MenuItem icon={<AiIcon className="w-5 h-5 text-primary" />} text="Build Mode" onClick={onBuildClick} />
         <div className="h-px bg-base-300 my-1 mx-2"></div>
         <MenuItem icon={<PaintBrushIcon className="w-5 h-5 text-accent" />} text="AI Design Studio" onClick={onDesignClick} />
-        <MenuItem icon={<PlayIcon className="w-5 h-5 text-neutral" />} text="Full Screen Preview" onClick={onToggleFullScreenPreview} />
+        <MenuItem icon={<ComputerDesktopIcon className="w-5 h-5 text-neutral" />} text="Full Screen Preview" onClick={onToggleFullScreenPreview} />
         <MenuItem icon={<CommandLineIcon className="w-5 h-5 text-neutral" />} text="Toggle Console" onClick={onToggleBottomPanel} />
         <div className="h-px bg-base-300 my-1 mx-2"></div>
         <MenuItem icon={<AnalyzeIcon className="w-5 h-5 text-neutral" />} text="Analyze Project" onClick={onAnalyzeClick} />

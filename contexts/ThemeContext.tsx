@@ -12,11 +12,12 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('theme') as Theme | null;
+      const savedTheme = localStorage.getItem('asai_theme') as Theme | null;
+      // If there's a saved theme, use it. Otherwise, check system preference.
       if (savedTheme) return savedTheme;
       return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
-    return 'dark'; // Default for SSR
+    return 'light'; // Default to light if window is not available (SSR)
   });
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('theme', theme);
+    localStorage.setItem('asai_theme', theme);
   }, [theme]);
 
   const toggleTheme = () => {

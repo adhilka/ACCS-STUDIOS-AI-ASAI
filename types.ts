@@ -99,13 +99,19 @@ export type ChatMessageSenderInfo = {
 export type AiChatMessage = ChatMessage & {
   // --- New fields for collaboration ---
   senderInfo?: ChatMessageSenderInfo; // For human senders
-  type?: 'text' | 'file_pin' | 'code_snippet';
+  type?: 'text' | 'file_pin' | 'code_snippet' | 'task';
   filePath?: string; // for file_pin
   code?: string; // for code_snippet
   language?: string; // for code_snippet
+  // --- New fields for tasks ---
+  taskText?: string;
+  isComplete?: boolean;
+  assignees?: string[];
+  // --- End of task fields ---
   mentions?: string[]; // Array of mentioned user UIDs
   isDeleted?: boolean; // For owner-controlled soft deletes
   // --- End of new fields ---
+  linkedFile?: string; // For linking to a file path
 
   plan?: AiPlan;
   planStatus?: 'pending' | 'approved' | 'rejected' | 'executing';

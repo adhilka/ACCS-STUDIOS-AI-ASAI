@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import FileExplorer from './FileExplorer';
-import { CodeIcon, ChatBubbleIcon, SaveIcon, TrashIcon } from './icons';
+import { CodeIcon, ChatBubbleIcon, SaveIcon, TrashIcon, ChecklistIcon } from './icons';
 import { FileNode, AiChatMessage, User, Project, ApiConfig, ApiPoolConfig, ApiPoolKey, ChatMessageSenderInfo, Snapshot } from '../types';
 import Spinner from './ui/Spinner';
 import ChatInterface from './ChatInterface';
+import TodoListPanel from './TodoListPanel';
 
 interface SidebarProps {
   files: FileNode[];
@@ -12,8 +13,8 @@ interface SidebarProps {
   onFileDelete: (id:string) => void;
   onFileAdd: (parentId: string, type: 'file' | 'folder') => void;
   onFileUpload: (file: File, parentPath: string) => void;
-  activeTab: 'files' | 'chat' | 'snapshots';
-  onTabChange: (tab: 'files' | 'chat' | 'snapshots') => void;
+  activeTab: 'files' | 'chat' | 'snapshots' | 'todo';
+  onTabChange: (tab: 'files' | 'chat' | 'snapshots' | 'todo') => void;
   isGenerating: boolean;
   onContextMenuRequest: (path: string, x: number, y: number) => void;
   isCollaborationEnabled: boolean;
@@ -35,6 +36,9 @@ interface SidebarProps {
   onSendRichMessage: (messageData: Partial<Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>>) => void;
   onDeleteMessage: (messageId: string) => void;
   onOpenFileFromPin: (filePath: string) => void;
+  onUpdateTaskStatus: (messageId: string, isComplete: boolean) => void;
+  chatMessageRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
+  onJumpToMessage: (messageId: string) => void;
 
   // Snapshot Props
   snapshots: Snapshot[];
@@ -42,7 +46,7 @@ interface SidebarProps {
   onDeleteSnapshot: (snapshotId: string) => void;
 }
 
-type Tab = 'files' | 'chat' | 'snapshots';
+type Tab = 'files' | 'chat' | 'snapshots' | 'todo';
 
 const SnapshotsPanel: React.FC<{
   isCollaborationEnabled: boolean;
@@ -123,6 +127,9 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
         <button data-testid="godmode-sidebar-chat-tab" onClick={() => onTabChange('chat')} className={tabClasses('chat')}>
           <ChatBubbleIcon /> {isCollaborationEnabled ? "Team Chat" : "AI Chat"}
         </button>
+         <button data-testid="godmode-sidebar-todo-tab" onClick={() => onTabChange('todo')} className={tabClasses('todo')}>
+          <ChecklistIcon /> To-Do
+        </button>
         <button data-testid="godmode-sidebar-snapshots-tab" onClick={() => onTabChange('snapshots')} className={tabClasses('snapshots')}>
           <SaveIcon /> Snapshots
         </button>
@@ -166,6 +173,15 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
                 onSendRichMessage={props.onSendRichMessage}
                 onDeleteMessage={props.onDeleteMessage}
                 onOpenFileFromPin={props.onOpenFileFromPin}
+                onUpdateTaskStatus={props.onUpdateTaskStatus}
+                chatMessageRefs={props.chatMessageRefs}
+            />
+        )}
+         {activeTab === 'todo' && (
+             <TodoListPanel
+                messages={props.messages}
+                onUpdateTaskStatus={props.onUpdateTaskStatus}
+                onJumpToMessage={props.onJumpToMessage}
             />
         )}
         {activeTab === 'snapshots' && (

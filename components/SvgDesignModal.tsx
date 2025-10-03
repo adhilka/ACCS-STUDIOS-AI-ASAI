@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Spinner from './ui/Spinner';
 import { PaintBrushIcon, CopyIcon, CheckIcon } from './icons';
+import { Project } from '../types';
 
 interface SvgDesignModalProps {
   isOpen: boolean;
@@ -9,9 +10,10 @@ interface SvgDesignModalProps {
   onSaveToFile: (svgCode: string) => void;
   onApplyAsIcon: (svgCode: string) => void;
   isGenerating: boolean;
+  project: Project | null;
 }
 
-const SvgDesignModal: React.FC<SvgDesignModalProps> = ({ isOpen, onClose, onGenerate, onSaveToFile, onApplyAsIcon, isGenerating }) => {
+const SvgDesignModal: React.FC<SvgDesignModalProps> = ({ isOpen, onClose, onGenerate, onSaveToFile, onApplyAsIcon, isGenerating, project }) => {
     const [prompt, setPrompt] = useState('');
     const [assetType, setAssetType] = useState<'icon' | 'background'>('icon');
     const [generatedSvg, setGeneratedSvg] = useState<string | null>(null);
@@ -45,6 +47,13 @@ const SvgDesignModal: React.FC<SvgDesignModalProps> = ({ isOpen, onClose, onGene
         setError(null);
         onClose();
     };
+
+    const handleGenerateFromProject = () => {
+        if (project) {
+            const newPrompt = `A minimalist and abstract SVG icon for a project named "${project.name}". The project is about: "${project.prompt}". The icon should be modern, clean, and represent the core idea of the project. Use simple shapes and lines.`;
+            setPrompt(newPrompt);
+        }
+    };
     
     const tabClasses = (tab: 'icon' | 'background') =>
     `px-4 py-2 text-sm font-semibold rounded-t-lg transition-colors border-b-2 ${
@@ -54,8 +63,8 @@ const SvgDesignModal: React.FC<SvgDesignModalProps> = ({ isOpen, onClose, onGene
     }`;
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300">
-            <div className="bg-base-200 rounded-lg shadow-2xl p-8 w-full max-w-4xl m-4 border border-base-300 flex flex-col" style={{height: '90vh'}}>
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
+            <div className="bg-base-200 rounded-lg shadow-2xl p-6 sm:p-8 w-full max-w-md sm:max-w-4xl border border-base-300 flex flex-col h-[90vh]">
                 <div className='flex items-center gap-3 mb-4'>
                     <PaintBrushIcon className="w-8 h-8 text-accent"/>
                     <div>
@@ -71,23 +80,31 @@ const SvgDesignModal: React.FC<SvgDesignModalProps> = ({ isOpen, onClose, onGene
                     </nav>
                 </div>
 
-                <div className="mb-4 flex gap-4">
-                    <textarea
+                <div className="mb-4 flex flex-col gap-2">
+                     <textarea
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
-                      placeholder={assetType === 'icon' ? "e.g., A minimalist logo of a mountain range inside a circle" : "e.g., A subtle, abstract background with wavy blue lines"}
-                      rows={2}
+                      placeholder={assetType === 'icon' ? "e.g., A minimalist logo of a mountain range..." : "e.g., A subtle background with wavy blue lines"}
+                      rows={3}
                       className="flex-grow w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-accent resize-none"
                       disabled={isGenerating}
                     />
-                    <button onClick={handleGenerate} disabled={isGenerating || !prompt.trim()} className="px-6 py-2 bg-accent hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 disabled:cursor-not-allowed w-48">
-                        {isGenerating ? <Spinner size="sm" /> : "Generate"}
-                    </button>
+                    <div className="flex flex-col sm:flex-row gap-4">
+                        {assetType === 'icon' && project && (
+                            <button onClick={handleGenerateFromProject} disabled={isGenerating} className="text-sm px-3 py-2 bg-base-300/70 hover:bg-base-300 rounded-md text-accent font-semibold transition-colors text-left">
+                                ✨ Generate a new icon idea from your project description
+                            </button>
+                        )}
+                        <button onClick={handleGenerate} disabled={isGenerating || !prompt.trim()} className="w-full sm:w-48 px-6 py-2 bg-accent hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 disabled:cursor-not-allowed sm:ml-auto">
+                            {isGenerating ? <Spinner size="sm" /> : "Generate"}
+                        </button>
+                    </div>
                 </div>
+
 
                 {error && <p className="text-red-400 text-sm p-3 rounded-md bg-red-500/10 border border-red-500/20 my-2">{error}</p>}
 
-                <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4 my-4 overflow-hidden">
+                <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4 my-2 overflow-hidden">
                     <div className="flex flex-col">
                          <h3 className="text-lg font-semibold mb-2 text-base-content">Preview</h3>
                          <div className="flex-grow bg-base-100 rounded-lg p-4 overflow-auto border border-base-300 flex items-center justify-center">
@@ -111,10 +128,10 @@ const SvgDesignModal: React.FC<SvgDesignModalProps> = ({ isOpen, onClose, onGene
                     </div>
                 </div>
 
-                <div className="flex justify-between items-center mt-6 pt-4 border-t border-base-300">
+                <div className="flex flex-col sm:flex-row justify-between items-center mt-6 pt-4 border-t border-base-300 gap-4">
                     <div>
                          {generatedSvg && (
-                             <div className="flex space-x-4">
+                             <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
                                 <button onClick={() => onSaveToFile(generatedSvg)} className="px-4 py-2 bg-primary/80 hover:bg-primary rounded-md text-white font-semibold transition-colors">
                                     Add to Project
                                 </button>
@@ -126,7 +143,7 @@ const SvgDesignModal: React.FC<SvgDesignModalProps> = ({ isOpen, onClose, onGene
                             </div>
                          )}
                     </div>
-                    <button onClick={handleClose} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
+                    <button onClick={handleClose} className="w-full sm:w-auto px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
                         Close
                     </button>
                 </div>

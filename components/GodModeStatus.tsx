@@ -14,26 +14,26 @@ const GodModeStatus: React.FC<GodModeStatusProps> = ({ currentAction, onStop }) 
   }
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-full max-w-4xl z-50 px-4">
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-full max-w-lg sm:max-w-4xl z-50 px-4">
       <div className="bg-base-300/80 backdrop-blur-md border border-yellow-400/50 rounded-lg shadow-2xl p-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="text-yellow-400">
+        <div className="flex items-center gap-4 overflow-hidden">
+          <div className="text-yellow-400 shrink-0">
             <CrownIcon className="w-8 h-8" />
           </div>
-          <div className="flex-grow">
+          <div className="flex-grow overflow-hidden">
             <h3 className="font-bold text-base-content flex items-center gap-2">
               <Spinner size="sm" />
               AI God Mode is Active
             </h3>
-            <div className="text-sm text-neutral mt-1 flex items-start gap-2">
+            <div className="hidden sm:flex text-sm text-neutral mt-1 items-start gap-2">
                 <BrainIcon className="w-4 h-4 mt-0.5 shrink-0" />
-                <p className="italic">"{currentAction.reasoning}"</p>
+                <p className="italic truncate">"{currentAction.reasoning}"</p>
             </div>
           </div>
         </div>
         <button
           onClick={onStop}
-          className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-md text-white font-semibold transition-colors text-sm"
+          className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-md text-white font-semibold transition-colors text-sm shrink-0"
         >
           Stop AI
         </button>

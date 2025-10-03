@@ -44,8 +44,8 @@ const DebugRefactorModal: React.FC<DebugRefactorModalProps> = ({
   const hasChanges = proposedChanges && proposedChanges.update && Object.keys(proposedChanges.update).length > 0;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300">
-      <div className="bg-base-200 rounded-lg shadow-2xl p-8 w-full max-w-4xl m-4 border border-base-300 flex flex-col" style={{height: '85vh'}}>
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
+      <div className="bg-base-200 rounded-lg shadow-2xl p-6 sm:p-8 w-full max-w-md sm:max-w-4xl border border-base-300 flex flex-col h-[90vh]">
         <div className='flex items-center gap-3 mb-4'>
             <WrenchScrewdriverIcon className="w-8 h-8 text-yellow-500"/>
             <div>

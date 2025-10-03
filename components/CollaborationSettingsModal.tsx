@@ -81,8 +81,8 @@ service cloud.firestore {
     };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[60] transition-opacity duration-300">
-      <div className="bg-base-200 rounded-lg shadow-2xl p-8 w-full max-w-3xl m-4 border border-base-300 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[60] transition-opacity duration-300 p-4">
+      <div className="bg-base-200 rounded-lg shadow-2xl p-6 sm:p-8 w-full max-w-md sm:max-w-3xl border border-base-300 max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-bold mb-2 text-base-content">Collaboration & Snapshots Setup</h2>
         <p className="text-sm text-neutral mb-6">Connect your own Firebase project to enable real-time collaboration using <strong className="text-base-content/80">Cloud Firestore</strong>.</p>
 

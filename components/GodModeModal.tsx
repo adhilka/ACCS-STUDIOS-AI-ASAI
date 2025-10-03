@@ -14,15 +14,7 @@ interface GodModeModalProps {
 const GodModeModal: React.FC<GodModeModalProps> = ({ isOpen, onClose, onStart, isLoading, apiConfig }) => {
   const [objective, setObjective] = useState('');
 
-  const missingKeys = useMemo(() => {
-    const keys: string[] = [];
-    if (!apiConfig.gemini) keys.push('Gemini');
-    if (!apiConfig.groq) keys.push('Groq');
-    if (!apiConfig.openrouter) keys.push('OpenRouter');
-    return keys;
-  }, [apiConfig]);
-  
-  const hasAllKeys = missingKeys.length === 0;
+  const hasAllKeys = useMemo(() => !!apiConfig.gemini && !!apiConfig.groq && !!apiConfig.openrouter, [apiConfig]);
 
   if (!isOpen) return null;
 
@@ -33,9 +25,19 @@ const GodModeModal: React.FC<GodModeModalProps> = ({ isOpen, onClose, onStart, i
     onClose();
   };
 
+  const KeyStatus: React.FC<{ provider: string, hasKey: boolean, icon: React.ReactNode }> = ({ provider, hasKey, icon }) => (
+     <div className={`flex items-center justify-between p-2 rounded-md text-sm ${hasKey ? 'bg-green-500/10 text-green-300' : 'bg-red-500/10 text-red-400'}`}>
+        <div className="flex items-center gap-2">
+            {icon}
+            <span className="font-semibold">{provider}</span>
+        </div>
+        <span>{hasKey ? 'Ready' : 'API Key Missing'}</span>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300">
-      <form onSubmit={handleSubmit} className="bg-base-200 rounded-lg shadow-2xl p-8 w-full max-w-3xl m-4 border border-base-300 flex flex-col" style={{height: '85vh'}}>
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
+      <form onSubmit={handleSubmit} className="bg-base-200 rounded-lg shadow-2xl p-6 sm:p-8 w-full max-w-md sm:max-w-3xl border border-base-300 flex flex-col h-[90vh]">
         <div className='flex items-center gap-3 mb-4'>
             <CrownIcon className="w-8 h-8 text-yellow-400"/>
             <div>
@@ -59,34 +61,23 @@ const GodModeModal: React.FC<GodModeModalProps> = ({ isOpen, onClose, onStart, i
         </div>
         
         <div className="p-4 rounded-lg border border-base-300 bg-base-100/50 mb-6">
-            <h3 className="font-bold text-center text-base-content mb-1">Powered by the Unified AI Core</h3>
-            <p className="text-xs text-neutral text-center mb-4">Our platform fuses multiple AI models into a single, synergistic entity for unparalleled performance.</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                <div className="p-3 bg-base-200 rounded-md">
-                    <GeminiIcon className="w-8 h-8 mx-auto text-blue-400 mb-2"/>
-                    <h4 className="font-semibold text-sm text-base-content">Advanced Reasoning</h4>
-                    <p className="text-xs text-neutral mt-1">Leveraging Gemini for complex problem-solving and planning.</p>
-                </div>
-                 <div className="p-3 bg-base-200 rounded-md">
-                    <GroqIcon className="w-8 h-8 mx-auto text-purple-400 mb-2"/>
-                    <h4 className="font-semibold text-sm text-base-content">Unmatched Speed</h4>
-                    <p className="text-xs text-neutral mt-1">Utilizing Groq for lightning-fast code generation and analysis.</p>
-                </div>
-                 <div className="p-3 bg-base-200 rounded-md">
-                    <OpenRouterIcon className="w-8 h-8 mx-auto text-green-400 mb-2"/>
-                    <h4 className="font-semibold text-sm text-base-content">Dynamic Flexibility</h4>
-                    <p className="text-xs text-neutral mt-1">Routing tasks through OpenRouter to the best-suited model.</p>
-                </div>
+            <h3 className="font-bold text-center text-base-content mb-3">AI Agent Trio</h3>
+            <p className="text-xs text-neutral text-center mb-4">God Mode uses a team of specialized AI agents to ensure accuracy and quality.</p>
+            <div className="space-y-2">
+                <KeyStatus provider="Gemini (Architect)" hasKey={!!apiConfig.gemini} icon={<GeminiIcon className="w-5 h-5"/>} />
+                <KeyStatus provider="Groq (Coder)" hasKey={!!apiConfig.groq} icon={<GroqIcon className="w-5 h-5"/>} />
+                <KeyStatus provider="OpenRouter (Reviewer)" hasKey={!!apiConfig.openrouter} icon={<OpenRouterIcon className="w-5 h-5"/>} />
             </div>
             {!hasAllKeys && (
                 <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-400/90 text-sm flex items-center gap-3">
                     <ExclamationTriangleIcon className="w-6 h-6 shrink-0"/>
                     <div>
-                       <span className="font-semibold">Missing API Keys:</span> God Mode requires API keys for {missingKeys.join(', ')}. Please add them in the API Key Settings.
+                       <span className="font-semibold">Missing API Keys:</span> Please add all three required API keys in Settings to enable God Mode.
                     </div>
                 </div>
             )}
         </div>
+
 
         <div className="flex justify-end space-x-4">
           <button

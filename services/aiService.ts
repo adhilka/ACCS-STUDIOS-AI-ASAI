@@ -103,7 +103,7 @@ async function callAiModel(
                 if (!apiKey) throw new Error(`API key for ${provider} is not configured. Please add your key or contact an admin to enable the key pool.`);
 
                 const isGroq = provider === 'groq';
-                const endpoint = isGroq ? 'https://api.groq.com/api/v1/chat/completions' : 'https://openrouter.ai/api/v1/chat/completions';
+                const endpoint = isGroq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://openrouter.ai/api/v1/chat/completions';
                 
                 let apiModel = model;
                 if (!apiModel) {
@@ -172,8 +172,17 @@ async function callAiModel(
     throw new Error(`AI model call failed after ${MAX_ATTEMPTS} attempts. Last error: ${lastError?.message}`);
 }
 
-// FIX: Made JSON parser more resilient to handle markdown and conversational text from the AI.
-const parseJsonResponse = <T>(text: string): T => {
+// FIX: Implemented a self-correction mechanism to handle malformed JSON responses from the AI.
+const parseJsonResponse = async <T>(
+    text: string,
+    provider: AiProvider, 
+    apiConfig: ApiConfig,
+    model: string | undefined,
+    userId: string,
+    apiPoolConfig?: ApiPoolConfig,
+    apiPoolKeys?: ApiPoolKey[],
+    projectId?: string | null
+): Promise<T> => {
     try {
         // Strategy 1: Find JSON within markdown code blocks.
         const markdownMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -212,9 +221,36 @@ const parseJsonResponse = <T>(text: string): T => {
         // Strategy 3: Try to parse the whole string as a fallback.
         return JSON.parse(text.trim()) as T;
         
-    } catch (error) {
-       console.error("Failed to parse AI JSON response after all strategies:", text);
-       throw new Error("Failed to parse AI response. The model may have returned invalid JSON.");
+    } catch (initialError) {
+       console.warn("Initial JSON parsing failed. Attempting self-correction.", { originalText: text });
+
+        const correctionPrompt = `The following response was expected to be a valid JSON object or array, but it failed to parse. Please analyze the text, correct any errors (like missing brackets, trailing commas, or extraneous text), and return ONLY the raw, valid JSON. Do not include any explanations, markdown, or apologies in your response.
+
+--- INVALID TEXT ---
+${text}
+--- END OF INVALID TEXT ---
+
+Return only the corrected JSON.`;
+        
+        try {
+            // Use a reliable provider for correction.
+            const correctedText = await callAiModel(
+                correctionPrompt, 
+                'gemini',
+                apiConfig,
+                'gemini-2.5-flash',
+                userId,
+                apiPoolConfig,
+                apiPoolKeys,
+                projectId
+            );
+
+            // Try parsing the corrected text. If this fails, we give up.
+            return JSON.parse(correctedText.trim()) as T;
+        } catch (correctionError) {
+            console.error("Self-correction also failed. The AI response is unrecoverable.", { initialText: text, correctionError });
+            throw new Error(`Failed to parse AI response, and self-correction also failed. The AI may have returned malformed text that could not be recovered.`);
+        }
     }
 };
 
@@ -232,7 +268,9 @@ export const generateInitialProject = async (
     const basePrompt = getProjectGenerationPrompt(projectType);
     const fullPrompt = `${basePrompt}\n\nThe user's request is: "${prompt}"`;
     const text = await callAiModel(fullPrompt, provider, apiConfig, model, userId, apiPoolConfig, apiPoolKeys, null);
-    const result = parseJsonResponse<{ projectName: string; files: Record<string, string> }>(text);
+    const result = await parseJsonResponse<{ projectName: string; files: Record<string, string> }>(
+        text, provider, apiConfig, model, userId, apiPoolConfig, apiPoolKeys, null
+    );
     
     if (!result.projectName || typeof result.projectName !== 'string' || !result.files || typeof result.files !== 'object') {
         throw new Error("AI returned an invalid structure for the project. Missing 'projectName' or 'files'.");
@@ -313,96 +351,297 @@ If the user's request is to RENAME/DELETE/COPY the project OR CLEAR the chat his
 **Example Response for a CLEAR user request:**
 {
   "thoughts": "The user wants to rename the main component and copy a utility file. I will first move App.tsx to Main.tsx. Then I will copy utils.ts to a new lib directory.",
-  "reasoning": "I will rename the main 'App' component to 'Main' for clarity and copy the 'utils.ts' file to a new 'lib' directory for better structure.",
+  "reasoning": "I will rename the main 'App' component to 'Main' for clarity and copy the utility functions to a shared 'lib' folder for better organization.",
   "plan": {
     "move": [{ "from": "src/App.tsx", "to": "src/Main.tsx" }],
     "copy": [{ "from": "src/utils.ts", "to": "src/lib/utils.ts" }]
   }
 }
-
-Do NOT generate any code content in this step. Only provide the plan in the specified JSON format.`;
-
+`;
     const text = await callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-    return parseJsonResponse<AiPlan>(text);
+    return await parseJsonResponse<AiPlan>(text, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
 };
 
 // FIX: Updated function signature to accept and pass userId and API pool parameters.
 export const executeModificationPlan = async (
     prompt: string, 
     plan: AiPlan, 
-    currentFiles: FileNode[], 
+    currentFiles: FileNode[],
     project: Project,
     apiConfig: ApiConfig,
     userId: string,
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<AiChanges> => {
-    const projectJsonString = JSON.stringify(fileSystemToJSON(currentFiles), null, 2);
+    const changes: AiChanges = {
+        create: {},
+        update: {},
+        delete: plan.plan.delete || [],
+        move: plan.plan.move || [],
+        copy: plan.plan.copy || [],
+    };
+    
+    const allFilesToCreate = [...(plan.plan.create || []), ...(plan.plan.update || [])];
 
-    const fullPrompt = `${baseInstruction} You are an expert software developer. Your plan to modify a project has been approved by the user. Now, you must generate the code to execute that plan.
+    if (allFilesToCreate.length > 0) {
+        const currentFilesJsonString = JSON.stringify(fileSystemToJSON(currentFiles), null, 2);
+        
+        const fullPrompt = `${baseInstruction} You are an expert, silent, programmatic software developer. Your task is to generate the code for a set of files based on a user's request and an execution plan.
 
-**Original User Request:** "${prompt}"
+**CRITICAL INSTRUCTIONS:**
+1.  Your response MUST be ONLY the raw JSON object. Do not include any text, explanations, or markdown formatting. Your entire response must start with \`{\` and end with \`}\`.
+2.  The JSON object keys MUST be the full file paths (e.g., "src/components/Button.tsx").
+3.  The JSON object values MUST be the complete, new string content for those files.
+4.  ONLY generate content for the files listed in the "Files to Generate" section below. Do NOT generate content for any other files.
+5.  If a file exists, you MUST provide its full new content. Do not provide diffs or partial code.
+6.  If you are updating the project icon at \`public/icon.svg\`, you must generate the complete XML content for a valid SVG file.
 
-**Your Approved Plan:**
+**User's Request:** "${prompt}"
+
+**Execution Plan:**
 \`\`\`json
 ${JSON.stringify(plan, null, 2)}
 \`\`\`
 
-**Current Project Files:**
+**Current Project Files (for context):**
 \`\`\`json
-${projectJsonString}
+${currentFilesJsonString}
 \`\`\`
 
-**CRITICAL INSTRUCTIONS:**
-1.  Generate the necessary code changes. You MUST respond with a single, valid JSON object describing the file changes. Do not include explanations or markdown formatting. Your entire response must start with \`{\` and end with \`}\`. The object can have three keys: "create", "update", and "delete". Your entire response must be ONLY this JSON object. Nothing else.
-2.  Ensure the generated code is complete, correct, and directly implements the approved plan. Only include files that are part of the plan.
-3.  **SVG Icon Generation:** If the plan involves creating or updating \`public/icon.svg\`, the content for this file MUST be valid, raw SVG code as a string. For example: \`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="blue" stroke="white" stroke-width="2"/></svg>\`. The SVG should be modern, simple, and reflect the project's purpose.`;
-
-    const text = await callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-    return parseJsonResponse<AiChanges>(text);
+**Files to Generate:**
+${allFilesToCreate.join('\n')}
+`;
+        
+        const text = await callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+        const generatedFiles = await parseJsonResponse<Record<string, string>>(
+            text, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id
+        );
+        
+        for(const path of (plan.plan.create || [])) {
+            if (generatedFiles[path] !== undefined) {
+                changes.create![path] = generatedFiles[path];
+            }
+        }
+        for(const path of (plan.plan.update || [])) {
+            if (generatedFiles[path] !== undefined) {
+                changes.update![path] = generatedFiles[path];
+            }
+        }
+    }
+    
+    return changes;
 };
 
 // FIX: Updated function signature to accept and pass userId and API pool parameters.
-export const answerProjectQuestion = async (
-    prompt: string, 
-    currentFiles: FileNode[], 
+export const summarizeChangesForMemory = async (
+    prompt: string,
+    plan: AiPlan,
+    changes: AiChanges,
     project: Project,
     apiConfig: ApiConfig,
     userId: string,
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<string> => {
-    const projectJsonString = JSON.stringify(fileSystemToJSON(currentFiles), null, 2);
-    const memoryFile = currentFiles.find(f => f.path === MEMORY_FILE_PATH);
-    const projectMemory = memoryFile?.content ? `
----
-**Project Memory & History**
-Here is a summary of previous work done on this project. Use this to inform your answer.
-${memoryFile.content}
----` : "";
+    
+    const changesSummary = `
+- Created: ${changes.create ? Object.keys(changes.create).join(', ') : 'None'}
+- Updated: ${changes.update ? Object.keys(changes.update).join(', ') : 'None'}
+- Deleted: ${changes.delete && Array.isArray(changes.delete) && changes.delete.length > 0 ? changes.delete.join(', ') : 'None'}
+- Moved: ${changes.move ? changes.move.map(m => `${m.from} -> ${m.to}`).join(', ') : 'None'}
+- Copied: ${changes.copy ? changes.copy.map(c => `${c.from} -> ${c.to}`).join(', ') : 'None'}
+    `.trim();
 
-    // FIX: Hardened the prompt to be more strict and prevent conversational, non-JSON responses.
-    const fullPrompt = `${baseInstruction} You are a helpful AI teaching assistant and expert software developer. Your role is to answer questions about the user's current project.
-Analyze the provided files, project memory, and the user's question, then provide a clear, concise, and helpful answer in Markdown.
+    const fullPrompt = `${baseInstruction} You are an AI project manager. Your task is to write a concise, one-paragraph summary of the work that was just completed.
 
-**CRITICAL INSTRUCTIONS:**
-1.  **Be an expert:** Provide accurate, code-aware answers based *only* on the context provided.
-2.  **Be direct:** Answer the question directly. Do not be conversational or add filler like "Sure, I can help with that."
-3.  **Use Markdown:** Format your response using Markdown for readability (code blocks, lists, etc.).
-4.  **Do not suggest changes:** Unless explicitly asked "how should I change this?", do not suggest modifications. Your role is to explain the existing code.
+**User's Request:** "${prompt}"
 
-${projectMemory}
+**AI's Reasoning:** "${plan.reasoning}"
 
-**Current Project Files:**
+**File Changes Made:**
+${changesSummary}
+
+Based on the information above, write a brief, one-paragraph summary for the project's memory log. Focus on the user's intent and the outcome.`;
+
+    const text = await callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+    return text.trim();
+};
+
+// FIX: Updated function signature to accept and pass userId and API pool parameters.
+export const analyzeCode = async (
+    files: FileNode[],
+    project: Project,
+    apiConfig: ApiConfig,
+    userId: string,
+    apiPoolConfig?: ApiPoolConfig,
+    apiPoolKeys?: ApiPoolKey[]
+): Promise<string> => {
+    const projectJsonString = JSON.stringify(fileSystemToJSON(files), null, 2);
+    const fullPrompt = `${baseInstruction} You are a world-class software architect and code reviewer. Analyze the following project files and provide a comprehensive summary of potential bugs, areas for improvement, and ways to adhere to best practices. Structure your response in clear markdown format.
+
+**Project Files:**
 \`\`\`json
 ${projectJsonString}
 \`\`\`
-
-**User's Question:** "${prompt}"
 `;
     return callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
 };
 
+// FIX: Updated function signature to accept and pass userId and API pool parameters.
+export const proposeFixes = async (
+    description: string,
+    filesToFix: { path: string, content: string }[],
+    project: Project,
+    apiConfig: ApiConfig,
+    userId: string,
+    apiPoolConfig?: ApiPoolConfig,
+    apiPoolKeys?: ApiPoolKey[]
+): Promise<AiChanges> => {
+    const filesJsonString = JSON.stringify(Object.fromEntries(filesToFix.map(f => [f.path, f.content])), null, 2);
+    const fullPrompt = `${baseInstruction} You are an expert programmer tasked with fixing a bug or refactoring code. Based on the user's description and the provided files, generate the complete, new content for the file(s) that need to be changed.
+
+**CRITICAL INSTRUCTIONS:**
+1. Your response MUST be ONLY the raw JSON object. Do not include any markdown or other text.
+2. The JSON object must have one key: "update".
+3. The value of "update" must be another object where keys are the full file paths and values are the complete, new file content.
+4. Only include files that you are actually changing.
+5. If you cannot determine a fix, respond with an empty "update" object: \`{"update": {}}\`.
+
+**Problem Description:** "${description}"
+
+**Files to Analyze/Fix:**
+\`\`\`json
+${filesJsonString}
+\`\`\`
+`;
+    const text = await callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+    return await parseJsonResponse<AiChanges>(text, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+}
+
+// --- Autonomous Agent Functions ---
+// FIX: Updated function signature to accept and pass userId and API pool parameters.
+export const runInitialProjectAgent = async (
+    prompt: string,
+    projectType: string,
+    provider: AiProvider,
+    model: string | undefined,
+    apiConfig: ApiConfig,
+    onAgentMessage: (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => Promise<void>,
+    userId: string,
+    apiPoolConfig?: ApiPoolConfig,
+    apiPoolKeys?: ApiPoolKey[]
+): Promise<{ projectName: string, changes: AiChanges }> => {
+    await onAgentMessage({ agentState: 'planning', text: "I'm planning the project structure based on your request.", thoughts: "The first step is to generate a complete and coherent set of files for the initial project scaffold." });
+    
+    const projectData = await generateInitialProject(prompt, projectType, provider, model, apiConfig, userId, apiPoolConfig, apiPoolKeys);
+    
+    const changes: AiChanges = { create: projectData.files };
+
+    await onAgentMessage({ agentState: 'finished', text: "I've finished generating the initial project files.", thoughts: "The project structure is complete. The next step is for the system to apply these changes to the workspace." });
+    
+    return { projectName: projectData.projectName, changes };
+};
+
+// FIX: Updated function signature to accept and pass userId and API pool parameters.
+export const runAutonomousAgent = async (
+    objective: string,
+    initialFiles: FileNode[],
+    project: Project,
+    apiConfig: ApiConfig,
+    onStateChange: (state: Partial<AgentState>) => void,
+    onAgentMessage: (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => Promise<void>,
+    userId: string,
+    apiPoolConfig?: ApiPoolConfig,
+    apiPoolKeys?: ApiPoolKey[]
+): Promise<FileNode[]> => {
+    let currentFiles = [...initialFiles];
+    
+    const plannerPrompt = `${baseInstruction} You are a senior software architect. Based on the user's high-level objective and the current project files, create a concise, step-by-step plan of action. Each step should be a single, clear task.
+
+**CRITICAL INSTRUCTIONS:**
+1. Your response MUST be ONLY a raw JSON array of strings. e.g., \`["Create a new component for the user profile", "Add the new component to the main App page"]\`.
+2. Do not include any other text, explanations, or markdown. Your entire response must start with \`[\` and end with \`]\`.
+
+**User Objective:** "${objective}"
+
+**Current Project Files:**
+\`\`\`json
+${JSON.stringify(fileSystemToJSON(currentFiles), null, 2)}
+\`\`\`
+`;
+
+    onStateChange({ status: 'running' });
+    await onAgentMessage({ agentState: 'planning', text: "I'm formulating a plan to achieve the objective.", thoughts: "First, I need to break down the user's objective into a sequence of actionable steps." });
+    
+    const planText = await callAiModel(plannerPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+    const plan = await parseJsonResponse<string[]>(
+        planText, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id
+    );
+
+    onStateChange({ plan: plan, logs: ["Plan generated."] });
+    
+    for (let i = 0; i < plan.length; i++) {
+        const task = plan[i];
+        onStateChange({ currentTaskIndex: i, logs: [`Starting task: ${task}`] });
+        
+        await onAgentMessage({ agentState: 'executing', currentTask: task, text: `Now working on: **${task}**`, thoughts: `I will now generate a plan to modify the files to complete the task: "${task}".` });
+        
+        const modificationPlan = await generateModificationPlan(task, currentFiles, project, apiConfig, userId, apiPoolConfig, apiPoolKeys);
+        const changes = await executeModificationPlan(task, modificationPlan, currentFiles, project, apiConfig, userId, apiPoolConfig, apiPoolKeys);
+        
+        // Simulate applying changes to our in-memory files for the next step
+        let tempFiles = [...currentFiles];
+        
+        // Deletions
+        const deletePaths = changes.delete || [];
+        tempFiles = tempFiles.filter(f => !deletePaths.includes(f.path));
+        
+        // Updates
+        if (changes.update) {
+            tempFiles = tempFiles.map(f => changes.update![f.path] ? { ...f, content: changes.update![f.path] } : f);
+        }
+        
+        // Creations
+        if (changes.create) {
+            for (const path in changes.create) {
+                tempFiles.push({ id: `temp-${path}`, name: path.split('/').pop() || '', path, type: 'file', content: changes.create[path] });
+            }
+        }
+        
+        currentFiles = tempFiles;
+        onStateChange({ logs: [`Completed task: ${task}`] });
+    }
+
+    onStateChange({ status: 'finished' });
+    await onAgentMessage({ agentState: 'finished', text: "I have completed all tasks in the plan.", thoughts: "The objective should now be complete. I will hand off the final file state to the system." });
+    
+    return currentFiles;
+}
+
+// FIX: Updated function signature to accept and pass userId and API pool parameters.
+export const answerProjectQuestion = async (
+    prompt: string,
+    files: FileNode[],
+    project: Project,
+    apiConfig: ApiConfig,
+    userId: string,
+    apiPoolConfig?: ApiPoolConfig,
+    apiPoolKeys?: ApiPoolKey[]
+): Promise<string> => {
+     const projectJsonString = JSON.stringify(fileSystemToJSON(files), null, 2);
+    const fullPrompt = `${baseInstruction} You are a helpful AI assistant with expertise in software development. The user has a question about their project. Based on the files provided, answer their question.
+
+**User's Question:** "${prompt}"
+
+**Project Files:**
+\`\`\`json
+${projectJsonString}
+\`\`\`
+`;
+    return callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+}
+
+// FIX: Updated function signature to accept and pass userId and API pool parameters.
 export const askGeneralQuestion = async (
     prompt: string,
     provider: AiProvider,
@@ -412,98 +651,12 @@ export const askGeneralQuestion = async (
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<string> => {
-    const fullPrompt = `${baseInstruction} You are a helpful, general-purpose AI assistant. Please provide a clear and concise answer to the user's question. Respond in user-friendly markdown format.
-
-User's Question: "${prompt}"`;
-    return callAiModel(fullPrompt, provider, apiConfig, model, userId, apiPoolConfig, apiPoolKeys, null); // No project ID for general questions
-};
-
-
-// FIX: Updated function signature to accept and pass userId and API pool parameters.
-export const summarizeChangesForMemory = async (
-    prompt: string, 
-    plan: AiPlan, 
-    changes: AiChanges, 
-    project: Project,
-    apiConfig: ApiConfig,
-    userId: string,
-    apiPoolConfig?: ApiPoolConfig,
-    apiPoolKeys?: ApiPoolKey[]
-): Promise<string> => {
-    const fullPrompt = `An AI developer task was just completed successfully. Your job is to write a brief, developer-focused summary of the work done to be stored in a memory log.
-This summary helps the AI maintain context for future requests. Focus on the "what" and "why" of the changes.
-
-- **Original User Request:** "${prompt}"
-- **AI's Plan:** ${plan.reasoning}
-- **Files Created:** ${Object.keys(changes.create || {}).join(', ') || 'None'}
-- **Files Updated:** ${Object.keys(changes.update || {}).join(', ') || 'None'}
-- **Files Deleted:** ${changes.delete?.join(', ') || 'None'}
-
-**Instructions:**
-Based on the information above, write a concise summary in Markdown format. Use bullet points for key changes.
-`;
-    return callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-}
-
-
-// FIX: Updated function signature to accept and pass userId and API pool parameters.
-export const analyzeCode = async(
-    currentFiles: FileNode[], 
-    project: Project,
-    apiConfig: ApiConfig,
-    userId: string,
-    apiPoolConfig?: ApiPoolConfig,
-    apiPoolKeys?: ApiPoolKey[]
-): Promise<string> => {
-    const projectJsonString = JSON.stringify(fileSystemToJSON(currentFiles), null, 2);
-    const fullPrompt = `${baseInstruction} You are an expert code analysis and debugging AI. Review the provided project files for bugs, syntax errors, performance issues, or opportunities for improvement.
-
-**Project Files:**
-\`\`\`json
-${projectJsonString}
-\`\`\`
-
-**Instructions:**
-Analyze the code and provide a summary of your findings. If you find issues, list them clearly with the file path and a brief explanation. If you have specific suggestions for fixes, provide them. If the code looks good, state that. Respond in clear, user-friendly markdown format. If you need more information from the user to resolve an issue, ask a clarifying question.`;
-
-    return callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+    const fullPrompt = `${baseInstruction} You are a helpful AI assistant. Answer the user's question.
+Question: "${prompt}"`;
+    return callAiModel(fullPrompt, provider, apiConfig, model, userId, apiPoolConfig, apiPoolKeys, null);
 };
 
 // FIX: Updated function signature to accept and pass userId and API pool parameters.
-export const proposeFixes = async (
-    problemDescription: string,
-    filesToFix: { path: string; content: string }[],
-    project: Project,
-    apiConfig: ApiConfig,
-    userId: string,
-    apiPoolConfig?: ApiPoolConfig,
-    apiPoolKeys?: ApiPoolKey[]
-): Promise<AiChanges> => {
-    const fileContentString = filesToFix.map(f => `// File: ${f.path}\n\n${f.content}`).join('\n\n---\n\n');
-
-    const fullPrompt = `${baseInstruction} You are an expert software developer and debugger. A user has reported an issue or requested a refactoring for the following file(s).
-Your task is to analyze the problem and generate the exact, minimal code changes required to fix it.
-
-**Problem Description / Refactor Goal:** "${problemDescription}"
-
-**Current File Content(s):**
-\`\`\`
-${fileContentString}
-\`\`\`
-
-**CRITICAL INSTRUCTIONS:**
-Generate the necessary code changes. You MUST respond with a single, valid JSON object describing the file changes. Do not include explanations or markdown. The object can have one key: "update". Your entire response must be ONLY this JSON object. Nothing else.
-
-- Only modify the file(s) provided. Do not suggest creating or deleting files.
-- Replace the entire content of the file with the corrected version. Do not provide partial snippets or diffs.
-- Ensure your fix is correct, efficient, and directly addresses the user's request.
-- If you cannot determine a fix, respond with an empty "update" object.
-`;
-
-    const text = await callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-    return parseJsonResponse<AiChanges>(text);
-};
-
 export const generateCodeSnippet = async (
     prompt: string,
     project: Project,
@@ -512,12 +665,13 @@ export const generateCodeSnippet = async (
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<string> => {
-    const fullPrompt = `You are an expert software developer. A user has requested a small code snippet. Generate only the code based on their request. Do not add explanations, markdown formatting, or any conversational text.
-
-User's Request: "${prompt}"`;
+    const fullPrompt = `${baseInstruction} You are an expert programmer. The user wants a code snippet. Based on their request, generate only the raw code for the snippet. Do not wrap it in markdown or add any explanations.
+Request: "${prompt}"`;
     return callAiModel(fullPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
 };
 
+// --- New AI Asset Generation Functions ---
+// FIX: Updated function signature to accept and pass userId and API pool parameters.
 export const generateSvgAsset = async (
     prompt: string,
     assetType: 'icon' | 'background',
@@ -527,38 +681,25 @@ export const generateSvgAsset = async (
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<string> => {
-
-    let instruction: string;
-    if (assetType === 'icon') {
-        instruction = `You are an expert SVG designer. Your task is to generate raw SVG code based on a user's prompt.
-**CRITICAL INSTRUCTIONS:**
-1.  Your response MUST BE ONLY the raw SVG code. It must start with "<svg" and end with "</svg>". Do not include any text, explanations, or markdown formatting (like \`\`\`xml).
-2.  The SVG MUST be modern, clean, and minimalist.
-3.  The SVG MUST use a \`viewBox="0 0 100 100"\` (or similar square aspect ratio).
-4.  Use \`currentColor\` for fill or stroke properties where appropriate, so the icon can be easily styled with CSS.
-5.  Do not include any \`<style>\` tags or class attributes. Use inline attributes for styling.
-6.  Ensure the SVG is a single, self-contained file. Do not use external references.`;
-    } else { // background
-        instruction = `You are an expert SVG designer specializing in backgrounds and patterns. Your task is to generate raw SVG code based on a user's prompt.
-**CRITICAL INSTRUCTIONS:**
-1.  Your response MUST BE ONLY the raw SVG code. It must start with "<svg" and end with "</svg>". Do not include any text, explanations, or markdown formatting.
-2.  The design should be abstract, subtle, and suitable as a website background. Avoid complex, distracting imagery.
-3.  The SVG should be tileable if possible. Consider using \`<defs>\` and \`<pattern>\` to create seamless patterns.
-4.  Use a large \`viewBox\` that can scale, for example \`viewBox="0 0 800 600"\`.
-5.  Do not use any external references or fonts.`;
-    }
-
-    const fullPrompt = `${instruction}\n\n**User's Request:** "${prompt}"`;
-
-    // This feature is best suited for Gemini, so we'll prefer it.
-    const provider: AiProvider = 'gemini';
+    const generationPrompt = assetType === 'icon' 
+    ? `${baseInstruction} You are a minimalist SVG designer. Create a modern, clean, abstract SVG icon based on the user's prompt. The response must be ONLY the raw SVG XML code, starting with \`<svg ...>\` and ending with \`</svg>\`. Do not include markdown or any other text.
+    - The SVG should be square and use \`viewBox="0 0 100 100"\`.
+    - Use \`currentColor\` for fill/stroke colors so it can be styled with CSS.
+    - Do not use any inline styles or width/height attributes on the <svg> tag.
+    User prompt: "${prompt}"`
+    : `${baseInstruction} You are a minimalist SVG designer. Create a subtle, abstract SVG background pattern based on the user's prompt. The response must be ONLY the raw SVG XML code, starting with \`<svg ...>\` and ending with \`</svg>\`. Do not include markdown or any other text.
+    - Use subtle shapes and low-opacity colors.
+    - Use CSS variables for colors where possible (e.g., \`fill="var(--color-primary)"\`).
+    - The design should not be distracting.
+    User prompt: "${prompt}"`;
     
-    return callAiModel(fullPrompt, provider, apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id);
-};
+    return callAiModel(generationPrompt, 'gemini', apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id);
+}
 
+// --- AI GOD MODE ---
 export const godModePlanner = async (
     objective: string,
-    currentFiles: FileNode[],
+    files: FileNode[],
     uiContext: string,
     project: Project,
     apiConfig: ApiConfig,
@@ -566,315 +707,110 @@ export const godModePlanner = async (
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<AiGodModeAction[]> => {
-    const projectJsonString = JSON.stringify(fileSystemToJSON(currentFiles), null, 2);
 
-    // Step 1: Gemini (Orchestrator) creates the high-level plan.
-    const planPrompt = `You are "God Mode" Orchestrator AI (Gemini), an autonomous agent controlling a web dev app.
-Your task is to break down the user's objective into a sequence of precise UI/file actions.
-You MUST respond with a valid JSON array of action objects. Do not add any other text.
-You have two specialist assistants: a Speed Coder (Groq) and a Flexible Analyst (OpenRouter).
-For 'MODIFY_FILES' actions, you will state the goal in the 'reasoning' and leave the payload empty. A specialist will write the code.
+    // --- 1. PRE-FLIGHT CHECKS & SETUP ---
+    // God Mode requires all three providers for its specialized agent roles.
+    if (!apiConfig.gemini || !apiConfig.groq || !apiConfig.openrouter) {
+        const missing = [
+            !apiConfig.gemini && 'Gemini',
+            !apiConfig.groq && 'Groq',
+            !apiConfig.openrouter && 'OpenRouter'
+        ].filter(Boolean).join(', ');
+        throw new Error(`God Mode requires API keys for Gemini, Groq, and OpenRouter. Missing: ${missing}. Please add them in your settings.`);
+    }
 
-**Action Schema:**
-- \`CLICK_ELEMENT\`: To click a button/tab. Requires a \`selector\`.
-- \`TYPE_IN_INPUT\`: To type text. Requires a \`selector\` and a string \`payload\`.
-- \`MODIFY_FILES\`: To change files. Requires an empty \`payload\`.
-- \`ASK_USER\`: To ask for clarification. Requires a question string as \`payload\`.
-- \`FINISH\`: To signify completion. This MUST be the last action.
+    const godModeMemory: string[] = [`Initial User Objective: "${objective}"`];
+    const finalPlan: AiGodModeAction[] = [];
+    const currentFilesJson = JSON.stringify(fileSystemToJSON(files), null, 2);
 
-For each action, you MUST provide a "reasoning" string explaining your thought process for that specific step.
+    // --- 2. THE ARCHITECT (GEMINI) - Creates the high-level plan ---
+    const architectSchema = {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          type: { type: Type.STRING, description: "Action type: 'CLICK_ELEMENT', 'TYPE_IN_INPUT', 'MODIFY_FILES', 'ASK_USER', 'FINISH'." },
+          selector: { type: Type.STRING, description: "The 'data-testid' selector for UI actions." },
+          payload: { type: Type.STRING, description: "Text for TYPE_IN_INPUT, question for ASK_USER, or a DETAILED PROMPT for a Coder AI for MODIFY_FILES." },
+        },
+        required: ['type']
+      }
+    };
+    
+    const architectPrompt = `You are "The Architect," the master planner for an autonomous AI agent. Your goal is to break down a user's objective into a sequence of precise actions.
 
-**User's Objective:** "${objective}"
-**Current Project Files:** \`\`\`json\n${projectJsonString}\n\`\`\`
-**Interactable UI Elements:** \`\`\`json\n${uiContext}\n\`\`\`
+**USER OBJECTIVE:** ${objective}
+**AVAILABLE UI ELEMENTS:** ${uiContext}
+**CURRENT PROJECT FILES:** ${currentFilesJson}
+**SHARED MEMORY LOG:**
+- ${godModeMemory.join('\n- ')}
+
+**CRITICAL INSTRUCTIONS:**
+1.  Formulate a step-by-step plan. Your response MUST be a JSON array of action objects.
+2.  For 'MODIFY_FILES' actions, the 'payload' MUST NOT be code. It MUST be a detailed, specific prompt for a separate Coder AI that will write the code.
+3.  The final action in your plan MUST always be \`{ "type": "FINISH" }\`.
+4.  Be precise with selectors. Use the exact 'data-testid' values provided.
+5.  Do not generate a 'reasoning' field.
 
 Generate the JSON plan now.`;
+    
+    const geminiAi = new GoogleGenAI({ apiKey: apiConfig.gemini });
+    const architectResponse = await geminiAi.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: architectPrompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: architectSchema
+      }
+    });
 
-    const geminiResponseText = await callAiModel(planPrompt, 'gemini', apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id);
-    const initialPlan = parseJsonResponse<AiGodModeAction[]>(geminiResponseText);
+    const rawPlan = await parseJsonResponse<Array<Omit<AiGodModeAction, 'reasoning'>>>(
+        architectResponse.text, 'gemini', apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id
+    );
 
-    const finalPlan: AiGodModeAction[] = [];
+    // --- 3. ORCHESTRATION LOOP - Augment the plan with Coder and Reviewer ---
+    for (const rawAction of rawPlan) {
+        let finalAction: AiGodModeAction = { ...rawAction, reasoning: '' };
 
-    for (const action of initialPlan) {
-        if (action.type === 'MODIFY_FILES') {
-            // Step 2: Groq (Code Generator) writes the code for the file modification step.
-            const groqPrompt = `You are a high-speed code generation AI (Groq). Based on the request and current project files, generate a JSON object with file changes ({create?:..., update?:..., delete?:...}). Your response must be ONLY the raw JSON object. Request: "${action.reasoning}"\n\nProject Files: ${projectJsonString}`;
-            const groqModel = 'llama3-8b-8192';
-            const groqResponseText = await callAiModel(groqPrompt, 'groq', apiConfig, groqModel, userId, apiPoolConfig, apiPoolKeys, project.id);
-            const groqChanges = parseJsonResponse<AiChanges>(groqResponseText);
+        // --- 3a. THE REVIEWER (OPENROUTER) - Generates the reasoning for each step ---
+        const reviewerPrompt = `You are "The Reviewer." Given an objective, a memory log, and a planned action, write a single, concise, human-readable sentence explaining WHY this action is being taken.
+        - Objective: "${objective}"
+        - Memory Log: "${godModeMemory.join('; ')}"
+        - Action to explain: ${JSON.stringify(rawAction)}
+        Your one-sentence explanation:`;
+        
+        const reasoningText = await callAiModel(reviewerPrompt, 'openrouter', apiConfig, 'mistralai/mistral-7b-instruct', userId, apiPoolConfig, apiPoolKeys, project.id);
+        finalAction.reasoning = reasoningText.trim().replace(/^"|"$/g, ''); // Remove quotes
+        godModeMemory.push(`Reviewer's justification for '${rawAction.type}': ${finalAction.reasoning}`);
 
-            // Step 3: OpenRouter (Analyst) reviews the generated code.
-            const openRouterPrompt = `You are a code analysis AI (OpenRouter). A plan was made: "${action.reasoning}". Code was generated: ${JSON.stringify(groqChanges)}. Is the code correct and complete for the request? Respond with a single, brief sentence of analysis starting with "Analysis:". For example: "Analysis: The code correctly creates the component." or "Analysis: The generated code is missing the necessary import statement."`;
-            const openRouterModel = 'mistralai/mistral-7b-instruct';
-            const openRouterResponseText = await callAiModel(openRouterPrompt, 'openrouter', apiConfig, openRouterModel, userId, apiPoolConfig, apiPoolKeys, project.id);
+        // --- 3b. THE CODER (GROQ) - Generates file content if needed ---
+        if (rawAction.type === 'MODIFY_FILES' && typeof rawAction.payload === 'string') {
+            const coderPrompt = `You are "The Coder," an expert programmer. Your response MUST be ONLY a raw JSON object with keys "create", "update", and/or "delete".
+            - The values for "create" and "update" must be objects where keys are full file paths and values are the complete new file content.
+            - The value for "delete" must be an array of file paths.
+            
+            Current project files for context:
+            ${currentFilesJson}
+            
+            Your task based on The Architect's request:
+            ---
+            ${rawAction.payload}
+            ---
+            Generate the JSON response now.`;
 
-            // Step 4: Combine results into the final action.
-            const refinedAction: AiGodModeAction = {
-                ...action,
-                payload: groqChanges,
-                reasoning: `[${openRouterResponseText.trim()}] ${action.reasoning}`
-            };
-            finalPlan.push(refinedAction);
-        } else {
-            // Push non-MODIFY_FILES actions directly to the final plan.
-            finalPlan.push(action);
+            const coderResultText = await callAiModel(coderPrompt, 'groq', apiConfig, 'llama3-8b-8192', userId, apiPoolConfig, apiPoolKeys, project.id);
+            const changes = await parseJsonResponse<AiChanges>(coderResultText, 'groq', apiConfig, 'llama3-8b-8192', userId, apiPoolConfig, apiPoolKeys, project.id);
+            
+            finalAction.payload = JSON.stringify(changes); // The executable payload
+            godModeMemory.push(`Coder implemented file changes based on Architect's prompt.`);
+        }
+        
+        finalPlan.push(finalAction);
+
+        if (finalAction.type === 'FINISH') {
+            break; // Stop processing after finish action
         }
     }
-
+    
     return finalPlan;
-};
-
-
-// --- Agent for Initial Project Generation ---
-// FIX: Updated function signature to accept and pass userId and API pool parameters.
-export const runInitialProjectAgent = async (
-    prompt: string,
-    projectType: string,
-    provider: AiProvider,
-    model: string | undefined,
-    apiConfig: ApiConfig,
-    onAgentMessage: (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => void,
-    userId: string,
-    apiPoolConfig?: ApiPoolConfig,
-    apiPoolKeys?: ApiPoolKey[]
-): Promise<{ projectName: string; changes: AiChanges }> => {
-    onAgentMessage({ 
-        text: "Okay, I'm starting on your request. First, I'll create a plan...", 
-        isLoading: false,
-        agentState: 'planning',
-        thoughts: `The user wants me to build a new ${projectType}. I will analyze their request to design a complete file structure with all necessary code, and then I'll generate the project files.`
-    });
-    
-    // This call can take time. The user sees the "planning" message.
-    const { projectName, files } = await generateInitialProject(prompt, projectType, provider, model, apiConfig, userId, apiPoolConfig, apiPoolKeys);
-
-    onAgentMessage({ 
-        text: `Plan complete for project "${projectName}". I will now generate the files.`, 
-        isLoading: false,
-        agentState: 'executing',
-        thoughts: "The plan and initial file structure have been generated successfully. Now I'll create each file one by one."
-    });
-
-    const changes: AiChanges = { create: {} };
-    const filePaths = Object.keys(files);
-
-    for (const path of filePaths) {
-        onAgentMessage({ 
-            text: `Creating file: \`${path}\``, 
-            isLoading: false,
-            agentState: 'executing',
-            currentTask: `Generate content for ${path}`
-        });
-        await new Promise(resolve => setTimeout(resolve, 200)); // Small delay for UX
-        changes.create![path] = files[path];
-    }
-    
-    onAgentMessage({ 
-        text: `All files have been generated for "${projectName}". Project is ready!`, 
-        isLoading: false,
-        agentState: 'finished',
-        thoughts: "All files have been created in memory. The project is now ready for the user to view and interact with."
-    });
-
-    return { projectName, changes };
-}
-
-
-// --- Autonomous Agent ---
-
-const applyChangesToMemory = (files: FileNode[], changes: AiChanges): FileNode[] => {
-    if (!changes) {
-        return [...files];
-    }
-    let newFiles = [...files];
-
-    // Deletions
-    if (changes.delete && Array.isArray(changes.delete)) {
-        newFiles = newFiles.filter(f => !changes.delete!.includes(f.path));
-    }
-
-    // Updates
-    if (changes.update) {
-        newFiles = newFiles.map(f => {
-            if (changes.update![f.path] !== undefined) {
-                return { ...f, content: changes.update![f.path] };
-            }
-            return f;
-        });
-    }
-
-    // Creations
-    if (changes.create) {
-        Object.entries(changes.create).forEach(([path, content]) => {
-            if (!newFiles.some(f => f.path === path)) {
-                newFiles.push({
-                    id: `temp-${path}-${Date.now()}`,
-                    name: path.split('/').pop() || '',
-                    path,
-                    type: 'file',
-                    content
-                });
-            }
-        });
-    }
-
-    return newFiles;
-};
-
-
-// FIX: Updated function signature to accept and pass userId and API pool parameters.
-export const runAutonomousAgent = async (
-    objective: string,
-    initialFiles: FileNode[],
-    project: Project,
-    apiConfig: ApiConfig,
-    onStateChange: (state: Partial<AgentState>) => void,
-    onAgentMessage: (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => void,
-    userId: string,
-    apiPoolConfig?: ApiPoolConfig,
-    apiPoolKeys?: ApiPoolKey[]
-): Promise<FileNode[]> => {
-
-    const systemPrompt = `${baseInstruction} You are "Devin", an expert autonomous AI software developer. Your goal is to achieve the user's objective by meticulously planning, writing code, analyzing the results, and self-correcting.
-You operate in a loop for each task: Execute -> Analyze -> Self-Correct. Your internal monologue (thoughts) is critical for your process. Be detailed in your reasoning.
-
-**Core Principles:**
-1.  **Plan First**: Deconstruct the objective into a detailed, step-by-step plan. Each step should be a small, logical, and verifiable task.
-2.  **Execute with Context**: When writing code, consider the entire project's architecture. Ensure new code is properly integrated (e.g., importing new components, updating dependency files like package.json if you add a new library).
-3.  **Analyze Rigorously**: After generating changes, act as a senior code reviewer. Critically assess your own work for correctness, completeness, and potential errors. Your analysis must be honest and detailed.
-4.  **Self-Correct Intelligently**: If your analysis reveals flaws, use that insight to inform your next attempt. Clearly state what was wrong and how you will fix it. Don't repeat mistakes.
-
-You must always respond in the requested JSON format. Include your detailed internal monologue in a "thoughts" field in all your JSON responses.`;
-
-    let currentFiles = [...initialFiles];
-    
-    // Read Memory
-    const memoryFile = currentFiles.find(f => f.path === MEMORY_FILE_PATH);
-    const projectMemory = memoryFile?.content ? `
----
-**Project Memory & History**
-Here is a summary of previous work done on this project. Use it to inform your plan.
-${memoryFile.content}
----` : "This is a new project, or no memory has been recorded yet.";
-
-    try {
-        // 1. Planning Step
-        onStateChange({ status: 'running', logs: ['Agent started. Creating initial plan...'], thoughts: 'I need to break down the user\'s objective into a series of smaller, concrete tasks.' });
-        onAgentMessage({ text: "Alright, I'm starting on your request. First, I'll create a plan.", agentState: 'planning', thoughts: 'I need to break down the user\'s objective into a series of smaller, concrete tasks.' });
-        
-        const planningPrompt = `${systemPrompt}\n\n**User's Objective:** "${objective}"\n\n${projectMemory}\n\n**Current Project Files:**\n\`\`\`json\n${JSON.stringify(fileSystemToJSON(currentFiles), null, 2)}\n\`\`\`\n\n**Instruction:**\nCreate a detailed, step-by-step plan to achieve the user's objective. The plan should be an array of short, actionable strings. Be thorough. For example, if adding a new library, include a step to update package.json. If creating a new component, include a step to import and use it.\nRespond with a JSON object with two keys: "thoughts" (your reasoning for the plan structure) and "plan" (the array of tasks).`;
-
-        const planResponseText = await callAiModel(planningPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-        const { thoughts: planThoughts, plan } = parseJsonResponse<{ thoughts: string; plan: string[] }>(planResponseText);
-        
-        onStateChange({ plan, thoughts: planThoughts, logs: [`Plan created with ${plan.length} steps.`] });
-        onAgentMessage({ text: "I've created a plan to achieve your objective.", agentState: 'planning', thoughts: planThoughts });
-
-        // 2. Execution Loop
-        for (let i = 0; i < plan.length; i++) {
-            const task = plan[i];
-            onStateChange({ currentTaskIndex: i, logs: [`Executing task ${i + 1}/${plan.length}: ${task}`] });
-
-            let taskCompleted = false;
-            let attempts = 0;
-            let lastAnalysis = "This is the first attempt.";
-
-            while(!taskCompleted && attempts < 3) {
-                attempts++;
-                const attemptLog = `Attempt ${attempts} for task: ${task}`;
-                onStateChange({ logs: [attemptLog], thoughts: `Attempt ${attempts}. My previous attempt failed because: ${lastAnalysis}. I will now try to generate the code changes for this task.` });
-                
-                const executionPrompt = `${systemPrompt}\n\n**Objective:** "${objective}"\n**Overall Plan:** [${plan.join(', ')}]\n**Current Task (${i + 1}/${plan.length}):** "${task}"\n**Analysis of Previous Attempt:** ${lastAnalysis}\n\n**Current Project Files:**\n\`\`\`json\n${JSON.stringify(fileSystemToJSON(currentFiles), null, 2)}\n\`\`\`\n\n**Instruction:**\nGenerate the complete file changes required to complete ONLY the current task. Provide full file contents, not diffs.\nRespond with a JSON object with two keys: "thoughts" (your reasoning for the code changes, including which files you are creating/updating/deleting and why) and "changes" (an object with "create", "update", and "delete" keys, following the format for code generation).`;
-                const executionResponseText = await callAiModel(executionPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-                const { thoughts: executionThoughts, changes } = parseJsonResponse<{ thoughts: string; changes: AiChanges }>(executionResponseText);
-                
-                const userFacingThought = executionThoughts.length > 200 ? executionThoughts.substring(0, 197) + "..." : executionThoughts;
-                onAgentMessage({ 
-                    text: `Okay, I'm working on **${task}**. (Attempt ${attempts}/3)`, 
-                    currentTask: task, 
-                    agentState: 'executing', 
-                    thoughts: `My plan is to: ${userFacingThought}`
-                });
-
-                const tempFilesAfterChanges = applyChangesToMemory(currentFiles, changes);
-                
-                const analysisPrompt = `${systemPrompt}\n\n**Objective:** "${objective}"\n**Current Task:** "${task}"\n**Changes I just made:**\n\`\`\`json\n${JSON.stringify(changes, null, 2)}\n\`\`\`\n**Project Files After My Changes:**\n\`\`\`json\n${JSON.stringify(fileSystemToJSON(tempFilesAfterChanges), null, 2)}\n\`\`\`\n\n**Instruction:**
-Act as a meticulous senior code reviewer. Critically analyze the changes I just made.
-1.  **Task Completion**: Does the code fully and correctly achieve the goal of "${task}"?
-2.  **Bugs & Errors**: Are there any syntax errors, logical bugs, or typos? Did I forget to import/export something?
-3.  **Integration**: If I created a new component/function, did I remember to integrate it into the existing application where it's needed?
-4.  **Dependencies**: If I used a new library, did I add it to \`package.json\`?
-5.  **Best Practices**: Does the code adhere to the project's existing style and conventions? Is it clean and maintainable?
-
-Based on this rigorous analysis, respond with a JSON object with three keys:
-- "thoughts": Your detailed internal monologue for this analysis. Be brutally honest.
-- "taskCompleted": A boolean (\`true\` or \`false\`). Be conservative; if there's any doubt, mark it as \`false\`.
-- "analysis": A concise, user-facing explanation of your findings. If not completed, clearly explain what's wrong and what your next attempt will focus on.`;
-                const analysisResponseText = await callAiModel(analysisPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-                const { thoughts: analysisThoughts, taskCompleted: completed, analysis } = parseJsonResponse<{ thoughts: string; taskCompleted: boolean; analysis: string; }>(analysisResponseText);
-
-                taskCompleted = completed;
-                lastAnalysis = analysis;
-                onStateChange({ logs: [`Analysis: ${analysis}`], thoughts: analysisThoughts });
-
-                if (taskCompleted) {
-                    onAgentMessage({ text: `Analysis complete: Task "${task}" was successful.`, currentTask: task, agentState: 'executing', thoughts: analysisThoughts });
-                    onStateChange({ logs: [`Task "${task}" completed successfully.`] });
-                    currentFiles = tempFilesAfterChanges; // Commit changes for this task
-                } else {
-                    onAgentMessage({ text: `Analysis complete: My previous attempt was not quite right. The issue is: ${analysis}`, currentTask: task, agentState: 'self-correcting', thoughts: analysisThoughts });
-                    onStateChange({ logs: [`Self-correction attempt ${attempts}: ${analysis}`] });
-                }
-            }
-            if (!taskCompleted) {
-                 throw new Error(`Agent failed to complete task "${task}" after ${attempts} attempts. Last analysis: ${lastAnalysis}`);
-            }
-        }
-        onStateChange({ status: 'finished', logs: ['All tasks completed successfully. Creating memory log...'] });
-        onAgentMessage({ text: "Objective complete! I've finished all tasks. Now, I'll write a summary of my work to memory.", agentState: 'finished', thoughts: 'The objective is complete. I need to summarize my work for future context.' });
-        
-        // --- Memory Writing Step ---
-        const finalFileState = fileSystemToJSON(currentFiles);
-        const memoryPrompt = `The autonomous agent work is complete.
-**Original Objective:** "${objective}"
-**Final File State:**
-\`\`\`json
-${JSON.stringify(finalFileState, null, 2)}
-\`\`\`
-**Task:** Write a brief, developer-focused summary in Markdown format of what was accomplished and why. This will be stored as a memory log for future AI agents working on this project. Focus on the architectural changes and key additions.
-- Start with a clear heading for this memory entry, like '### Implemented User Authentication'.
-- Use bullet points for key changes.
-- Be concise.
-`;
-        const memorySummary = await callAiModel(memoryPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-
-        const newMemoryContent = `${projectMemory.includes('This is a new project') ? '' : memoryFile!.content + '\n\n---\n\n'}${new Date().toISOString()}\n\n${memorySummary}`;
-
-        const memoryChanges: AiChanges = {
-            create: {},
-            update: {},
-        };
-
-        if (memoryFile) {
-            memoryChanges.update![MEMORY_FILE_PATH] = newMemoryContent;
-        } else {
-            memoryChanges.create![MEMORY_FILE_PATH] = newMemoryContent;
-        }
-        
-        currentFiles = applyChangesToMemory(currentFiles, memoryChanges);
-        
-        onAgentMessage({
-            text: "I've successfully completed the objective and updated my memory log. The project is ready for your review.",
-            agentState: 'finished',
-            thoughts: 'All tasks are complete. I have summarized my work and committed it to memory. The user can now take over.'
-        });
-
-        return currentFiles;
-
-    } catch(error) {
-        const errorMessage = error instanceof Error ? error.message : "An unrecoverable error occurred.";
-        onStateChange({ status: 'error', lastError: errorMessage, logs: [`Agent failed: ${errorMessage}`] });
-        onAgentMessage({ text: `I've run into a problem and have to stop: ${errorMessage}`, agentState: 'error', thoughts: `An unrecoverable error occurred: ${errorMessage}` });
-        throw error;
-    }
 };

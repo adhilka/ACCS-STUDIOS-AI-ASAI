@@ -48,8 +48,8 @@ const RebrandModal: React.FC<RebrandModalProps> = ({ isOpen, onClose, apiConfig 
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300">
-            <div className="bg-base-200 rounded-lg shadow-2xl p-8 w-full max-w-4xl m-4 border border-base-300 flex flex-col" style={{height: '90vh'}}>
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
+            <div className="bg-base-200 rounded-lg shadow-2xl p-6 sm:p-8 w-full max-w-md sm:max-w-4xl border border-base-300 flex flex-col h-[90vh]">
                 <div className='flex items-center gap-3 mb-4'>
                     <MagicWandIcon className="w-8 h-8 text-accent"/>
                     <div>
@@ -58,16 +58,16 @@ const RebrandModal: React.FC<RebrandModalProps> = ({ isOpen, onClose, apiConfig 
                     </div>
                 </div>
                 
-                <div className="mb-4 flex gap-4">
+                <div className="mb-4 flex flex-col sm:flex-row gap-4">
                     <input
                       type="text"
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
-                      placeholder="e.g., 'Cyberpunk synthwave', 'Minimalist solar', 'Deep ocean bioluminescence'"
+                      placeholder="e.g., 'Cyberpunk synthwave', 'Minimalist solar'"
                       className="flex-grow w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-accent"
                       disabled={isLoading}
                     />
-                    <button onClick={handleGenerate} disabled={isLoading || !prompt.trim()} className="px-6 py-2 bg-accent hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 disabled:cursor-not-allowed w-48">
+                    <button onClick={handleGenerate} disabled={isLoading || !prompt.trim()} className="w-full sm:w-48 px-6 py-2 bg-accent hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 disabled:cursor-not-allowed">
                         {isLoading ? <Spinner size="sm" /> : "Generate Identity"}
                     </button>
                 </div>
@@ -114,15 +114,15 @@ const RebrandModal: React.FC<RebrandModalProps> = ({ isOpen, onClose, apiConfig 
                     )}
                 </div>
 
-                <div className="flex justify-between items-center">
-                    <button onClick={handleReset} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <button onClick={handleReset} className="w-full sm:w-auto px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
                         Reset to Default
                     </button>
-                    <div className="flex space-x-4">
-                        <button type="button" onClick={onClose} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
+                    <div className="flex w-full sm:w-auto space-x-4">
+                        <button type="button" onClick={onClose} className="flex-1 px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
                             Cancel
                         </button>
-                        <button onClick={handleApply} disabled={!generatedAssets} className="px-6 py-2 bg-green-600 hover:bg-green-500 rounded-md text-white font-semibold transition-colors disabled:bg-opacity-50 disabled:cursor-not-allowed">
+                        <button onClick={handleApply} disabled={!generatedAssets} className="flex-1 px-6 py-2 bg-green-600 hover:bg-green-500 rounded-md text-white font-semibold transition-colors disabled:bg-opacity-50 disabled:cursor-not-allowed">
                             Apply Brand
                         </button>
                     </div>

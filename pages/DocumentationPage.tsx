@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeftIcon, CodeIcon, KeyIcon, PlayIcon, CommandLineIcon, ChatBubbleIcon, RobotIcon, WrenchScrewdriverIcon, AnalyzeIcon, UsersIcon, MagicWandIcon, SettingsIcon, RocketIcon, FileIcon } from '../components/icons';
+import { ArrowLeftIcon, CodeIcon, KeyIcon, PlayIcon, CommandLineIcon, ChatBubbleIcon, RobotIcon, WrenchScrewdriverIcon, AnalyzeIcon, UsersIcon, MagicWandIcon, SettingsIcon, RocketIcon, FileIcon, BrainIcon, SaveIcon } from '../components/icons';
 
 interface DocumentationPageProps {
     onBack: () => void;
@@ -29,6 +29,18 @@ const NavLink: React.FC<{ href: string, children: React.ReactNode }> = ({ href, 
     <a href={href} className="block text-sm text-neutral hover:text-primary hover:translate-x-1 transition-transform duration-200 py-1">{children}</a>
 );
 
+const features = [
+  { icon: RobotIcon, title: 'Autonomous Development', text: "Give the AI a high-level objective and watch it plan, code, analyze, and self-correct to complete the task." },
+  { icon: UsersIcon, title: 'Real-time Collaboration', text: "Code together in real-time. Invite your team and see every change mirrored instantly on your own secure server." },
+  { icon: ChatBubbleIcon, title: 'Rich Team Chat', text: "Go beyond code. Mention teammates, pin files, share and generate code snippets, and manage tasks with a built-in to-do list." },
+  { icon: SaveIcon, title: 'Version Control (Snapshots)', text: "Experiment without fear. Create a snapshot of your project at any point and revert back to a previous version instantly." },
+  { icon: PlayIcon, title: 'Live Sandbox Preview', text: "Instantly preview your application in a live, interactive StackBlitz environment right inside the editor." },
+  { icon: BrainIcon, title: 'Multi-Provider AI', text: "Choose the best AI for the job. Seamlessly switch between Gemini, Groq, and a wide range of models via OpenRouter." },
+  { icon: WrenchScrewdriverIcon, title: 'AI-Powered Debugging', text: "Describe a bug or issue, and let the AI analyze your code, propose a working fix, and apply it with your approval." },
+  { icon: RocketIcon, title: 'One-Click Deployment', text: "Deploy your project directly to CodeSandbox with a single click, with more providers like Netlify coming soon." },
+];
+
+
 const DocumentationPage: React.FC<DocumentationPageProps> = ({ onBack, onSignInClick }) => {
     return (
         <div className="min-h-screen bg-base-100 text-base-content">
@@ -51,11 +63,12 @@ const DocumentationPage: React.FC<DocumentationPageProps> = ({ onBack, onSignInC
                     </button>
                 </div>
             </header>
-            <div className="max-w-7xl mx-auto p-4 sm:p-8 grid grid-cols-1 md:grid-cols-12 gap-8">
-                <aside className="md:col-span-3 lg:col-span-2 md:sticky md:top-24 h-fit">
+            <div className="max-w-7xl mx-auto p-4 sm:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <aside className="hidden lg:block lg:col-span-2 md:sticky md:top-24 h-fit">
                     <h3 className="font-semibold text-base-content mb-3">On this page</h3>
                     <nav className="space-y-1">
                         <NavLink href="#intro">Introduction</NavLink>
+                        <NavLink href="#feature-overview">Feature Overview</NavLink>
                         <NavLink href="#getting-started">Getting Started</NavLink>
                         <NavLink href="#editor">The Editor Interface</NavLink>
                         <NavLink href="#ai-features">Core AI Features</NavLink>
@@ -64,9 +77,24 @@ const DocumentationPage: React.FC<DocumentationPageProps> = ({ onBack, onSignInC
                         <NavLink href="#admin">For Administrators</NavLink>
                     </nav>
                 </aside>
-                <main className="md:col-span-9 lg:col-span-10">
+                <main className="lg:col-span-10">
                     <Section id="intro" title="Introduction">
                         <p>Welcome to ACCS STUDIOS AI (ASAI), an AI-powered application builder that transforms your ideas into functional web applications. ASAI acts as an autonomous co-developer, handling the entire development lifecycle from planning and coding to analysis and self-correction. Whether you're a developer looking to eliminate boilerplate, an entrepreneur building an MVP, or a designer creating interactive prototypes, ASAI accelerates your workflow while keeping you in complete control.</p>
+                    </Section>
+
+                    <Section id="feature-overview" title="Feature Overview">
+                        <p className="text-center -mt-8 mb-12 text-neutral">ASAI is a comprehensive suite of tools designed for modern development. Here's a quick look at the key features available.</p>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 not-prose">
+                            {features.map((feature, i) => (
+                                <div key={feature.title} className="p-6 rounded-xl bg-base-200 border border-base-300">
+                                    <div className="relative">
+                                        <div className="mb-4 text-accent"><feature.icon className="w-8 h-8"/></div>
+                                        <h3 className="font-bold text-lg mb-2 text-base-content">{feature.title}</h3>
+                                        <p className="text-neutral text-sm">{feature.text}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </Section>
                     
                     <Section id="getting-started" title="Getting Started">
@@ -106,7 +134,7 @@ const DocumentationPage: React.FC<DocumentationPageProps> = ({ onBack, onSignInC
                         <p>For complex tasks, activate Auto-Dev mode. Give the AI a high-level objective (e.g., "implement user authentication"), and watch it work. The modal provides a real-time view of the AI's plan, current task, internal thoughts, and action log as it codes, analyzes, and self-corrects to complete the objective.</p>
 
                          <h3><WrenchScrewdriverIcon className="w-4 h-4 inline-block mr-2"/>Debugging & Refactoring</h3>
-                        <p>Encounter a bug? Open the Debug & Refactor modal, describe the problem, and the AI will analyze the relevant code and propose a precise fix that you can review and apply with one click.</p>
+                        <p>Encounter a bug? Open the Debug & Refactor modal, describe the problem, and the AI will analyze the relevant code, propose a precise fix that you can review and apply with one click.</p>
 
                         <h3><AnalyzeIcon className="w-4 h-4 inline-block mr-2"/>Code Analysis</h3>
                         <p>Click the "Analyze Project" button in the header to get a comprehensive review of your entire codebase for bugs, performance issues, and best-practice recommendations.</p>

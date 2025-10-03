@@ -1,24 +1,23 @@
 // FIX: Import firebase to use its types.
 import firebase from 'firebase/compat/app';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from './hooks/useAuth';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import EditorPage from './pages/EditorPage';
 import Spinner from './components/ui/Spinner';
-import LandingPage from './pages/LandingPage';
 import { BrandingProvider } from './contexts/BrandingContext';
 // FIX: Import admin-related firestore functions and types.
 import { createProject, getUserApiConfig, saveUserApiConfig, getApiPoolConfig, getApiPoolKeys, ensureUserDocument, getUserProfile, getAdminSettings, updateUserTokenBalance } from './services/firestoreService';
-import { ApiConfig, AiProvider, ApiPoolConfig, ApiPoolKey, User } from './types';
+import { ApiConfig, AiProvider, ApiPoolConfig, ApiPoolKey, User, Project } from './types';
 import DocumentationPage from './pages/DocumentationPage';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 // FIX: Encapsulated all logic within the App component to fix scoping issues.
 const App: React.FC = () => {
     const { user: firebaseUser, loading } = useAuth();
     const [appUser, setAppUser] = useState<User | null>(null);
     const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-    const [showLogin, setShowLogin] = useState(false);
     
     const [initialGenerationTask, setInitialGenerationTask] = useState<{ prompt: string; provider: AiProvider, model?: string } | null>(null);
     const [isNavigating, setIsNavigating] = useState(false); // Used for interim loading state
@@ -113,27 +112,20 @@ const App: React.FC = () => {
         setInitialGenerationTask(null);
     }, []);
 
-    // This is now the primary function to kick things off from Landing or Dashboard
     const handleStartBuilding = useCallback(async (prompt: string, provider?: AiProvider, model?: string) => {
         if (!appUser) {
-            // If user isn't logged in, save the task and show the login page.
-            setInitialGenerationTask({ prompt, provider: provider || 'gemini', model });
-            setShowLogin(true);
+            alert("Please sign in to create a project.");
             return;
         }
 
         setIsNavigating(true);
         try {
-            // For now, default to React Web App. This could be a user choice later.
             const projectType = 'React Web App';
             const projectProvider = provider || 'gemini';
-            // Use a temporary name; the AI will provide a better one.
             const tempName = prompt.length > 50 ? prompt.substring(0, 47) + '...' : prompt;
             
-            // Create a new, empty project in Firestore to get an ID.
             const newProjectId = await createProject(appUser.uid, tempName, prompt, projectType, projectProvider, {}, model);
             
-            // Set the task for the EditorPage to execute upon loading.
             setInitialGenerationTask({ prompt, provider: projectProvider, model });
             setSelectedProjectId(newProjectId);
 
@@ -144,13 +136,6 @@ const App: React.FC = () => {
             setIsNavigating(false);
         }
     }, [appUser]);
-
-    // Effect to trigger project creation after login if a prompt is pending
-    useEffect(() => {
-        if (appUser && initialGenerationTask && !selectedProjectId && !isNavigating) {
-             handleStartBuilding(initialGenerationTask.prompt, initialGenerationTask.provider, initialGenerationTask.model);
-        }
-    }, [appUser, initialGenerationTask, selectedProjectId, isNavigating, handleStartBuilding]);
 
 
     const handleSelectProject = (projectId: string) => {
@@ -164,7 +149,7 @@ const App: React.FC = () => {
 
     const renderContent = () => {
         if (showDocs) {
-            return <DocumentationPage onBack={() => setShowDocs(false)} onSignInClick={() => { setShowDocs(false); setShowLogin(true); }} />;
+            return <DocumentationPage onBack={() => setShowDocs(false)} onSignInClick={() => setShowDocs(false)} />;
         }
         
         if (loading || (firebaseUser && !appUser) || isNavigating) {
@@ -178,6 +163,7 @@ const App: React.FC = () => {
         
         if (appUser) {
             if (selectedProjectId) {
+                const project = { prompt: initialGenerationTask?.prompt, provider: initialGenerationTask?.provider, model: initialGenerationTask?.model } as Project;
                 return <EditorPage 
                             projectId={selectedProjectId} 
                             onBackToDashboard={handleBackToDashboard} 
@@ -206,21 +192,15 @@ const App: React.FC = () => {
                     />;
         }
 
-        // User is not logged in
-        if (showLogin) {
-            return <LoginPage onBackToHome={() => {
-                setShowLogin(false);
-                setInitialGenerationTask(null); // Clear prompt if user cancels login
-            }} />;
-        }
-
-        return <LandingPage onStartBuilding={handleStartBuilding} onSignInClick={() => setShowLogin(true)} onShowDocs={() => setShowDocs(true)} />;
+        return <LoginPage onShowDocs={() => setShowDocs(true)} />;
     };
 
     return (
-        <BrandingProvider>
-            {renderContent()}
-        </BrandingProvider>
+        <ThemeProvider>
+            <BrandingProvider>
+                {renderContent()}
+            </BrandingProvider>
+        </ThemeProvider>
     );
 };
 
