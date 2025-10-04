@@ -12,9 +12,10 @@ import { createProject, getUserApiConfig, saveUserApiConfig, getApiPoolConfig, g
 import { ApiConfig, AiProvider, ApiPoolConfig, ApiPoolKey, User, Project } from './types';
 import DocumentationPage from './pages/DocumentationPage';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { AlertProvider, useAlert } from './contexts/AlertContext';
 
-// FIX: Encapsulated all logic within the App component to fix scoping issues.
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
+    const { showAlert } = useAlert();
     const { user: firebaseUser, loading } = useAuth();
     const [appUser, setAppUser] = useState<User | null>(null);
     const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -22,10 +23,8 @@ const App: React.FC = () => {
     const [initialGenerationTask, setInitialGenerationTask] = useState<{ prompt: string; provider: AiProvider, model?: string } | null>(null);
     const [isNavigating, setIsNavigating] = useState(false); // Used for interim loading state
     
-    // FIX: Added 'e2b: null' to the initial state to match the ApiConfig type.
     const [apiConfig, setApiConfig] = useState<ApiConfig>({ gemini: null, openrouter: null, groq: null, e2b: null });
     
-    // FIX: Added state for admin features.
     const [apiPoolConfig, setApiPoolConfig] = useState<ApiPoolConfig>({ isEnabled: false });
     const [apiPoolKeys, setApiPoolKeys] = useState<ApiPoolKey[]>([]);
 
@@ -114,7 +113,7 @@ const App: React.FC = () => {
 
     const handleStartBuilding = useCallback(async (prompt: string, provider?: AiProvider, model?: string) => {
         if (!appUser) {
-            alert("Please sign in to create a project.");
+            showAlert("Please sign in to create a project.", 'info');
             return;
         }
 
@@ -131,11 +130,11 @@ const App: React.FC = () => {
 
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "Failed to create project.";
-            alert(`Error: ${errorMessage}`);
+            showAlert(`Error: ${errorMessage}`, 'error');
         } finally {
             setIsNavigating(false);
         }
-    }, [appUser]);
+    }, [appUser, showAlert]);
 
 
     const handleSelectProject = (projectId: string) => {
@@ -195,10 +194,16 @@ const App: React.FC = () => {
         return <LoginPage onShowDocs={() => setShowDocs(true)} />;
     };
 
+    return renderContent();
+}
+
+const App: React.FC = () => {
     return (
         <ThemeProvider>
             <BrandingProvider>
-                {renderContent()}
+                <AlertProvider>
+                    <AppContent />
+                </AlertProvider>
             </BrandingProvider>
         </ThemeProvider>
     );

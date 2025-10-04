@@ -129,6 +129,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onShowDocs }) => {
                             Documentation
                         </button>
                     </div>
+                    <p className="text-center text-xs text-neutral/50 mt-4">Version 1.0.1 ALPHA</p>
                 </div>
             </div>
         </div>

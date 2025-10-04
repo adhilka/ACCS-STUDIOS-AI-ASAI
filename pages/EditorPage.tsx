@@ -35,6 +35,7 @@ import TodoListPanel from '../components/TodoListPanel';
 // FIX: Import GodModeModal to be used in the component.
 import GodModeModal from '../components/GodModeModal';
 import GodModeStatus from '../components/GodModeStatus';
+import { useAlert } from '../contexts/AlertContext';
 
 declare const JSZip: any;
 declare const LZString: any;
@@ -108,6 +109,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const [godModeActionQueue, setGodModeActionQueue] = useState<AiGodModeAction[]>([]);
     const [currentGodModeAction, setCurrentGodModeAction] = useState<AiGodModeAction | null>(null);
     const [isGodModeActive, setIsGodModeActive] = useState(false);
+    const { showAlert } = useAlert();
     
     const chatMessageRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
@@ -232,7 +234,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
                     } catch (collabError) {
                          console.error("Failed to initialize or connect to custom Firebase server:", collabError);
-                         alert("Could not connect to the project's custom server. Real-time collaboration is disabled. Please check the owner's configuration and security rules.");
+                         showAlert("Could not connect to the project's custom server. Real-time collaboration is disabled. Please check the owner's configuration and security rules.", 'error');
                     }
                 }
                 
@@ -263,7 +265,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             isMounted = false;
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [projectId, user]);
+    }, [projectId, user, showAlert]);
 
     useEffect(() => {
         // Auto-select first file if none is selected and files are loaded
@@ -401,21 +403,40 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     
         const userMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'user', text: message };
         await addChatMessage(projectId, userMessage, dbInstance);
+        const currentChatMessages = [...chatMessages, userMessage];
     
-        let promptWithContext = message;
-    
+        // --- CONTEXT BUILDING ---
+        let contextHeader = '';
         if (mode === 'build' || mode === 'ask') {
-            const recentMessages = chatMessages.slice(-10).reverse();
-            const lastPinnedFileMessage = recentMessages.find(m => m.type === 'file_pin' && m.filePath);
-            
-            if (lastPinnedFileMessage) {
+            const recentMessages = currentChatMessages.slice(-15);
+    
+            // 1. Pinned File Context
+            const lastPinnedFileMessage = [...recentMessages].reverse().find(m => m.type === 'file_pin' && m.filePath);
+            if (lastPinnedFileMessage && lastPinnedFileMessage.filePath) {
                 const file = files.find(f => f.path === lastPinnedFileMessage.filePath);
                 if (file && file.content !== undefined) {
-                    const contextHeader = `The user has pinned the file \`${file.path}\` in the chat. Its content is provided below for context. When formulating your response, assume the user might be referring to this file when they say "this", "it", etc.\n\n--- CONTENT OF ${file.path} ---\n${file.content}\n--- END OF CONTENT ---\n\nUser request: `;
-                    promptWithContext = contextHeader + message;
+                    contextHeader += `CONTEXT: The user has recently pinned the file \`${file.path}\`. Its content is provided below. Prioritize this file when considering changes.\n\n--- CONTENT OF ${file.path} ---\n${file.content}\n--- END OF CONTENT ---\n\n`;
+                }
+            }
+    
+            if (mode === 'build') {
+                // 2. To-Do List Context
+                const openTasks = currentChatMessages.filter(m => m.type === 'task' && !m.isComplete && m.taskText);
+                if (openTasks.length > 0) {
+                    contextHeader += `CONTEXT: The project has the following open tasks. Consider if the user's request relates to any of these tasks.\n\n--- OPEN TASKS ---\n${openTasks.map(t => `- ${t.taskText}`).join('\n')}\n--- END OF TASKS ---\n\n`;
+                }
+    
+                // 3. Recent Snippet Context
+                const recentSnippets = currentChatMessages.filter(m => m.type === 'code_snippet' && m.code).slice(-2);
+                if (recentSnippets.length > 0) {
+                    contextHeader += `CONTEXT: The following code snippets were recently generated in the chat. They may be relevant.\n\n--- RECENT SNIPPETS ---\n${recentSnippets.map(s => `// Snippet for: ${s.text}\n${s.code}`).join('\n\n')}\n--- END OF SNIPPETS ---\n\n`;
                 }
             }
         }
+        
+        const promptWithContext = contextHeader 
+            ? `${contextHeader}Based on all the context above, here is the user's request: "${message}"` 
+            : message;
     
         try {
             const key = apiConfig[project.provider];
@@ -525,7 +546,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             await updateChatMessage(projectId, messageId, { isComplete }, dbInstance);
         } catch (error) {
             console.error("Failed to update task status:", error);
-            alert("Could not update task.");
+            showAlert("Could not update task.", 'error');
         }
     };
 
@@ -576,7 +597,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             setIsSettingsModalOpen(false);
         } catch (error) {
             console.error("Failed to save project settings:", error);
-            alert("Error saving settings.");
+            showAlert("Error saving settings.", 'error');
         } finally {
             setIsAiLoading(false);
         }
@@ -616,7 +637,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             setProposedFixes(fixes);
         } catch (err) {
              const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-             alert(`Error proposing fixes: ${errorMessage}`);
+             showAlert(`Error proposing fixes: ${errorMessage}`, 'error');
         } finally {
             setIsFixing(false);
         }
@@ -629,10 +650,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             await applyAiChanges(projectId, files, proposedFixes, dbInstance);
             setProposedFixes(null);
             setIsDebugRefactorModalOpen(false);
-            alert("Fixes applied successfully!");
+            showAlert("Fixes applied successfully!", 'success');
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-            alert(`Error applying fixes: ${errorMessage}`);
+            showAlert(`Error applying fixes: ${errorMessage}`, 'error');
         } finally {
             setIsFixing(false);
         }
@@ -744,25 +765,25 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                     break;
                 case 'ASK_USER':
                     if (typeof action.payload === 'string') {
-                        alert(`AI is asking: ${action.payload}`);
+                        showAlert(`AI is asking: ${action.payload}`, 'info');
                     }
                     break;
                 case 'FINISH':
                     setIsGodModeActive(false);
                     setGodModeActionQueue([]);
-                    alert("God Mode has completed the objective.");
+                    showAlert("God Mode has completed the objective.", 'success');
                     break;
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : "An unknown error occurred.";
-            alert(`God Mode Action Failed: ${message}`);
+            showAlert(`God Mode Action Failed: ${message}`, 'error');
             setIsGodModeActive(false);
             setGodModeActionQueue([]);
             setCurrentGodModeAction(null);
             return;
         }
         setCurrentGodModeAction(null);
-    }, [projectId, files, dbInstance]);
+    }, [projectId, files, dbInstance, showAlert]);
 
     useEffect(() => {
         if (isGodModeActive && currentGodModeAction === null && godModeActionQueue.length > 0) {
@@ -773,7 +794,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         } else if (isGodModeActive && godModeActionQueue.length === 0 && currentGodModeAction === null) {
             // If the queue runs out but FINISH wasn't the last action
             setIsGodModeActive(false);
-            alert("God Mode finished all planned steps.");
+            showAlert("God Mode finished all planned steps.", 'info');
         }
     }, [isGodModeActive, currentGodModeAction, godModeActionQueue, executeGodModeAction]);
 
@@ -809,7 +830,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             }
         } catch (err) {
             const message = err instanceof Error ? err.message : "An unknown error occurred.";
-            alert(`God Mode Failed: ${message}`);
+            showAlert(`God Mode Failed: ${message}`, 'error');
             setIsGodModeActive(false);
             setCurrentGodModeAction(null);
         } finally {
@@ -821,7 +842,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         setIsGodModeActive(false);
         setGodModeActionQueue([]);
         setCurrentGodModeAction(null);
-        alert("God Mode stopped by user.");
+        showAlert("God Mode stopped by user.", 'info');
     };
 
     const handleGenerateShareKey = async (pid: string) => {
@@ -831,7 +852,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const handleRemoveMember = async (memberUid: string) => {
         if (!project || !isOwner) return;
         if (memberUid === user.uid) {
-            alert("You cannot remove yourself from the project.");
+            showAlert("You cannot remove yourself from the project.", 'info');
             return;
         }
         if (window.confirm("Are you sure you want to remove this member from the project? Their access will be revoked immediately.")) {
@@ -839,7 +860,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 await removeProjectMember(projectId, memberUid);
             } catch (error) {
                 console.error("Failed to remove member:", error);
-                alert("Error: Could not remove member.");
+                showAlert("Error: Could not remove member.", 'error');
             }
         }
     };
@@ -875,11 +896,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         if (filePath) {
             try {
                 await addFileOrFolder(projectId, filePath, 'file', svgCode, dbInstance);
-                alert(`File saved to ${filePath}`);
+                showAlert(`File saved to ${filePath}`, 'success');
                 setIsSvgDesignModalOpen(false);
             } catch (err) {
                 const message = err instanceof Error ? err.message : "Could not save file.";
-                alert(`Error: ${message}`);
+                showAlert(`Error: ${message}`, 'error');
             }
         }
     };
@@ -898,11 +919,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
         try {
             await applyAiChanges(projectId, files, changes, dbInstance);
-            alert("Project icon updated successfully!");
+            showAlert("Project icon updated successfully!", 'success');
             setIsSvgDesignModalOpen(false);
         } catch (err) {
             const message = err instanceof Error ? err.message : "Could not apply icon.";
-            alert(`Error: ${message}`);
+            showAlert(`Error: ${message}`, 'error');
         }
     };
 
@@ -983,7 +1004,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 });
             } catch (err) {
                 console.error("Failed to save file:", err);
-                alert("Error saving file. See console for details.");
+                showAlert("Error saving file. See console for details.", 'error');
             } finally {
                 setSavingFile(null);
             }
@@ -1005,7 +1026,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                     setSelectedFilePath(newPath);
                 }
             } catch(e) {
-                alert(`Error renaming: ${e instanceof Error ? e.message : 'Unknown error'}`);
+                showAlert(`Error renaming: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
             }
         }
     };
@@ -1021,7 +1042,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
 
     const handleCreateSnapshot = async () => {
         if (!isOwner) {
-            alert("Only the project owner can create snapshots.");
+            showAlert("Only the project owner can create snapshots.", 'info');
             return;
         }
         const message = prompt("Enter a brief description for this snapshot:");
@@ -1030,17 +1051,17 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 const fileData = JSON.stringify(files);
                 const compressedData = LZString.compressToUTF16(fileData);
                 await createSnapshot(projectId, message.trim(), compressedData, dbInstance);
-                alert("Snapshot created successfully!");
+                showAlert("Snapshot created successfully!", 'success');
             } catch (error) {
                 console.error("Failed to create snapshot:", error);
-                alert(`Error: ${error instanceof Error ? error.message : "Could not create snapshot."}`);
+                showAlert(`Error: ${error instanceof Error ? error.message : "Could not create snapshot."}`, 'error');
             }
         }
     };
 
     const handleDeleteSnapshot = async (snapshotId: string) => {
         if (!isOwner) {
-            alert("Only the project owner can delete snapshots.");
+            showAlert("Only the project owner can delete snapshots.", 'info');
             return;
         }
         if (window.confirm("Are you sure you want to permanently delete this snapshot?")) {
@@ -1048,7 +1069,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 await deleteSnapshot(projectId, snapshotId, dbInstance);
             } catch (error) {
                 console.error("Failed to delete snapshot:", error);
-                alert(`Error: ${error instanceof Error ? error.message : "Could not delete snapshot."}`);
+                showAlert(`Error: ${error instanceof Error ? error.message : "Could not delete snapshot."}`, 'error');
             }
         }
     };
@@ -1073,7 +1094,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             await addFileOrFolder(projectId, newPath, 'file', originalFile.content || '', dbInstance);
             setSelectedFilePath(newPath);
         } catch(e) {
-            alert(`Error duplicating file: ${e instanceof Error ? e.message : 'Unknown error'}`);
+            showAlert(`Error duplicating file: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
         }
     };
     
@@ -1138,7 +1159,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 />
                 <main className="flex-grow overflow-hidden">
                     <div className="h-full" style={{ display: mobileView === 'files' ? 'block' : 'none' }}>
-                        <FileExplorer files={files} selectedFilePath={selectedFilePath} onFileSelect={handleFileSelect} onFileDelete={handleFileDelete} onFileAdd={handleFileAdd} onFileUpload={handleFileUpload} onContextMenuRequest={handleContextMenuRequest} />
+                        <FileExplorer files={files} selectedFilePath={selectedFilePath} onFileSelect={handleFileSelect} onFileDelete={handleFileDelete} onFileAdd={handleFileAdd} onFileUpload={handleFileUpload} onContextMenuRequest={handleContextMenuRequest} projectId={projectId} />
                     </div>
                     <div className="h-full" style={{ display: mobileView === 'chat' ? 'block' : 'none' }}>
                         <ChatInterface messages={chatMessages} onSendMessage={handleSendMessage} isLoading={isAiLoading} onApprovePlan={handleApprovePlan} onRejectPlan={handleRejectPlan} projectMembers={projectMembers} currentUser={user} isOwner={isOwner} files={files} project={project} apiConfig={apiConfig} apiPoolConfig={apiPoolConfig} apiPoolKeys={apiPoolKeys} currentUserId={user.uid} onSendRichMessage={handleSendRichMessage} onDeleteMessage={(id) => deleteChatMessage(projectId, id, dbInstance)} onOpenFileFromPin={handleFileSelect} onUpdateTaskStatus={handleUpdateTaskStatus} chatMessageRefs={chatMessageRefs}/>
@@ -1216,6 +1237,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                         isGenerating={isGeneratingInitialProject}
                         onContextMenuRequest={handleContextMenuRequest}
                         isCollaborationEnabled={isCollaborationEnabled}
+                        projectId={projectId}
                         messages={chatMessages}
                         onSendMessage={handleSendMessage}
                         isLoading={isAiLoading}

@@ -18,6 +18,7 @@ interface SidebarProps {
   isGenerating: boolean;
   onContextMenuRequest: (path: string, x: number, y: number) => void;
   isCollaborationEnabled: boolean;
+  projectId: string;
   
   // Chat Props
   messages: AiChatMessage[];
@@ -110,7 +111,7 @@ const SnapshotsPanel: React.FC<{
 
 
 const Sidebar: React.FC<SidebarProps> = (props) => {
-  const { activeTab, onTabChange, isCollaborationEnabled, snapshots, onCreateSnapshot, onDeleteSnapshot, isOwner } = props;
+  const { activeTab, onTabChange, isCollaborationEnabled, snapshots, onCreateSnapshot, onDeleteSnapshot, isOwner, projectId } = props;
 
   const tabClasses = (tab: Tab, disabled: boolean = false) => `flex-1 py-2 px-4 text-sm font-medium text-center cursor-pointer flex items-center justify-center gap-2 border-b-2 transition-colors ${
     disabled
@@ -159,6 +160,7 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
                     onFileAdd={props.onFileAdd}
                     onFileUpload={props.onFileUpload}
                     onContextMenuRequest={props.onContextMenuRequest}
+                    projectId={projectId}
                 />
             )
         )}

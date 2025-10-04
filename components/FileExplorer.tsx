@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { FileNode } from '../types';
 import { 
     FolderIcon, FileIcon, DeleteIcon, AddFileIcon, AddFolderIcon, SearchIcon, UploadIcon,
@@ -13,6 +13,7 @@ interface FileExplorerProps {
   onFileAdd: (path: string, type: 'file' | 'folder') => void;
   onFileUpload: (file: File, parentPath: string) => void;
   onContextMenuRequest: (path: string, x: number, y: number) => void;
+  projectId: string;
 }
 
 interface TreeNode {
@@ -166,10 +167,36 @@ const TreeNodeComponent: React.FC<{
 };
 
 
-const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, onFileSelect, onFileDelete, onFileAdd, onFileUpload, onContextMenuRequest }) => {
+const FileExplorer: React.FC<FileExplorerProps> = ({ files, selectedFilePath, onFileSelect, onFileDelete, onFileAdd, onFileUpload, onContextMenuRequest, projectId }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(['src']));
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const LOCAL_STORAGE_KEY = `asai_expanded_folders_${projectId}`;
+
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+            return new Set(parsed);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse expanded folders from localStorage", e);
+    }
+    // Default for new projects or on error
+    return new Set(['src']);
+  });
+  
+  useEffect(() => {
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(Array.from(expandedFolders)));
+      } catch (e) {
+        console.error("Failed to save expanded folders to localStorage", e);
+      }
+  }, [expandedFolders, LOCAL_STORAGE_KEY]);
+
 
   const handleFolderToggle = (path: string) => {
     setExpandedFolders(prev => {

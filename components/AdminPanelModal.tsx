@@ -3,6 +3,7 @@ import { ApiPoolConfig, ApiPoolKey, AiProvider, AdminUser, AdminSettings, AdminS
 import { DeleteIcon, KeyIcon, UsersIcon, SaveIcon, CheckIcon, CodeIcon, FileIcon, DatabaseIcon, SettingsIcon, TokenIcon, ExclamationTriangleIcon } from './icons';
 import Spinner from './ui/Spinner';
 import { formatTokens } from '../utils/formatters';
+import { useAlert } from '../contexts/AlertContext';
 
 interface AdminPanelModalProps {
   isOpen: boolean;
@@ -44,6 +45,7 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const [editTokenValue, setEditTokenValue] = useState<string>('');
   const [dailyReward, setDailyReward] = useState(adminSettings.dailyTokenReward.toString());
   const [errorFilter, setErrorFilter] = useState('');
+  const { showAlert } = useAlert();
 
   if (!isOpen) return null;
 
@@ -57,7 +59,7 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         await onAddKey(selectedProvider, newKey.trim());
         setNewKey('');
       } catch (e) {
-        alert(`Failed to add key: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        showAlert(`Failed to add key: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
       }
     }
   };
@@ -82,9 +84,9 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     const reward = parseInt(dailyReward, 10);
     if (!isNaN(reward)) {
         onSaveAdminSettings({ dailyTokenReward: reward });
-        alert("Settings saved!");
+        showAlert("Settings saved!", 'success');
     } else {
-        alert("Invalid daily reward amount.");
+        showAlert("Invalid daily reward amount.", 'error');
     }
   };
   

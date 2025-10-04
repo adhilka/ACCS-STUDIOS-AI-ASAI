@@ -52,6 +52,7 @@ const GodModeModal: React.FC<GodModeModalProps> = ({ isOpen, onClose, onStart, i
           </label>
            <textarea
               id="objective"
+              data-testid="godmode-objective-input"
               value={objective}
               onChange={(e) => setObjective(e.target.value)}
               className="flex-grow w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-yellow-500 resize-none"
@@ -90,6 +91,7 @@ const GodModeModal: React.FC<GodModeModalProps> = ({ isOpen, onClose, onStart, i
           </button>
           <button
             type="submit"
+            data-testid="godmode-start-button"
             disabled={isLoading || !objective.trim() || !hasAllKeys}
             className="px-6 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 disabled:cursor-not-allowed w-40"
           >

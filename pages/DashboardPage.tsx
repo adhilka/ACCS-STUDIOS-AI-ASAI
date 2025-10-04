@@ -12,6 +12,7 @@ import AdminPanelModal from '../components/AdminPanelModal';
 import { auth } from '../services/firebase';
 import { formatTokens } from '../utils/formatters';
 import ThemeToggle from '../components/ThemeToggle';
+import { useAlert } from '../contexts/AlertContext';
 
 
 interface DashboardProps {
@@ -80,6 +81,7 @@ const NewProjectBuilder: React.FC<{ onStartBuilding: (prompt: string, provider: 
                 <div className="flex flex-col sm:flex-row items-start gap-4">
                     <select
                         value={provider}
+                        data-testid="godmode-dashboard-provider-select"
                         onChange={e => setProvider(e.target.value as AiProvider)}
                         className="w-full sm:w-auto h-11 bg-base-200 border border-base-300 rounded-md px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-primary transition-colors hover:bg-base-300 shrink-0"
                         disabled={isLoading}
@@ -92,6 +94,7 @@ const NewProjectBuilder: React.FC<{ onStartBuilding: (prompt: string, provider: 
                     {(provider === 'openrouter' || provider === 'groq') && (
                         <select
                             value={model}
+                            data-testid="godmode-dashboard-model-select"
                             onChange={e => setModel(e.target.value)}
                             className="w-full sm:w-auto h-11 bg-base-200 border border-base-300 rounded-md px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-primary transition-colors hover:bg-base-300 shrink-0"
                             disabled={isLoading}
@@ -176,6 +179,7 @@ const DashboardPage: React.FC<DashboardProps> = ({
     const [platformErrors, setPlatformErrors] = useState<PlatformError[]>([]);
     const [usageStats, setUsageStats] = useState<UserUsageStats | null>(null);
     const [apiCallCount, setApiCallCount] = useState<number>(0);
+    const { showAlert } = useAlert();
     
     const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -225,15 +229,15 @@ const DashboardPage: React.FC<DashboardProps> = ({
         try {
             // First, try to join as a real-time collaborator via invite code
             const joinedProject = await acceptInvite(key, user.uid, user.email);
-            alert(`Successfully joined collaborative project: ${joinedProject.name}`);
+            showAlert(`Successfully joined collaborative project: ${joinedProject.name}`, 'success');
         } catch (inviteError) {
              // If invite fails, try as a simple share key
             try {
                 const joinedProject = await joinProjectByShareKey(key, user.uid);
-                alert(`Successfully joined project: ${joinedProject.name}`);
+                showAlert(`Successfully joined project: ${joinedProject.name}`, 'success');
             } catch (shareError) {
                 const finalError = inviteError instanceof Error ? inviteError.message : String(inviteError);
-                alert(`Failed to join project: ${finalError}`);
+                showAlert(`Failed to join project: ${finalError}`, 'error');
             }
         } finally {
             await fetchDashboardData();
@@ -331,7 +335,10 @@ const DashboardPage: React.FC<DashboardProps> = ({
                 <div className="max-w-7xl mx-auto p-4 flex justify-between items-center relative">
                     <div className="flex items-center gap-3">
                        <div className="bg-primary p-2 rounded-md"><CodeIcon className="w-6 h-6 text-white"/></div>
-                       <h1 className="text-xl font-bold text-base-content">ASAI Dashboard</h1>
+                        <div className="flex items-baseline gap-2">
+                          <h1 className="text-xl font-bold text-base-content">ASAI Dashboard</h1>
+                          <span className="text-xs bg-accent/20 text-accent font-semibold px-2 py-0.5 rounded-full">v1.0.1 ALPHA</span>
+                        </div>
                     </div>
                     <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
                         {isCreating && <AiTypingIndicator />}

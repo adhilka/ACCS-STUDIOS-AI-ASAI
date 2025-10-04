@@ -90,6 +90,7 @@ const DebugRefactorModal: React.FC<DebugRefactorModalProps> = ({
                     <label htmlFor="scope" className="block text-sm font-medium text-neutral mb-2">Scope</label>
                     <select
                         id="scope"
+                        data-testid="godmode-debug-scope-select"
                         value={scope}
                         onChange={e => setScope(e.target.value as 'file' | 'project')}
                         className="w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-yellow-500"

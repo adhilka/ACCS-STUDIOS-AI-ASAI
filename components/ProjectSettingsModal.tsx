@@ -114,8 +114,8 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
         
         <div className="border-b border-base-300 mb-6">
             <nav className="-mb-px flex space-x-6" aria-label="Tabs">
-                <button onClick={() => setActiveTab('general')} className={tabClasses('general')}>General</button>
-                {isOwner && <button onClick={() => setActiveTab('members')} className={tabClasses('members')}>Members & Collaboration</button>}
+                <button onClick={() => setActiveTab('general')} className={tabClasses('general')} data-testid="godmode-settings-general-tab">General</button>
+                {isOwner && <button onClick={() => setActiveTab('members')} className={tabClasses('members')} data-testid="godmode-settings-members-tab">Members & Collaboration</button>}
             </nav>
         </div>
 
@@ -142,6 +142,7 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
                             </label>
                             <select
                                 id="sandboxType"
+                                data-testid="godmode-sandbox-type-select"
                                 value={sandboxType}
                                 onChange={e => setSandboxType(e.target.value as 'iframe' | 'stackblitz')}
                                 className="w-full h-[42px] bg-base-100 border border-base-300 rounded-md px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -158,6 +159,7 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
                             </label>
                              <select
                                 id="provider"
+                                data-testid="godmode-provider-select"
                                 value={provider}
                                 onChange={e => setProvider(e.target.value as AiProvider)}
                                 className="w-full h-[42px] bg-base-100 border border-base-300 rounded-md px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -174,6 +176,7 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({ isOpen, onC
                                 </label>
                                 <select
                                     id="model"
+                                    data-testid="godmode-model-select"
                                     value={model}
                                     onChange={e => setModel(e.target.value)}
                                     className="w-full h-[42px] bg-base-100 border border-base-300 rounded-md px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-primary"

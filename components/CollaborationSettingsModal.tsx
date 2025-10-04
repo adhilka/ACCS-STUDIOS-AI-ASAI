@@ -3,6 +3,7 @@ import { User, CustomFirebaseConfig } from '../types';
 import { saveCustomFirebaseConfig } from '../services/firestoreService';
 import Spinner from './ui/Spinner';
 import { ExclamationTriangleIcon, CopyIcon, CheckIcon } from './icons';
+import { useAlert } from '../contexts/AlertContext';
 
 interface CollaborationSettingsModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ const CollaborationSettingsModal: React.FC<CollaborationSettingsModalProps> = ({
   const [showRules, setShowRules] = useState(false);
   const [rulesCopied, setRulesCopied] = useState(false);
   const [currentHostname, setCurrentHostname] = useState('');
+  const { showAlert } = useAlert();
 
   useEffect(() => {
     if (isOpen) {
@@ -48,11 +50,11 @@ const CollaborationSettingsModal: React.FC<CollaborationSettingsModalProps> = ({
     setIsSaving(true);
     try {
       await saveCustomFirebaseConfig(user.uid, config);
-      alert('Settings saved successfully!');
+      showAlert('Settings saved successfully!', 'success');
       onUpdateSuccess?.(); // Trigger profile refresh
       onClose();
     } catch (error) {
-      alert(`Failed to save settings: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showAlert(`Failed to save settings: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     } finally {
       setIsSaving(false);
     }

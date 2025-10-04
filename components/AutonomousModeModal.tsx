@@ -47,6 +47,7 @@ const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ isOpen, onClo
                     </label>
                     <textarea
                         id="objective"
+                        data-testid="godmode-autodev-objective-input"
                         value={objective}
                         onChange={(e) => setObjective(e.target.value)}
                         className="flex-grow w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-secondary resize-none"
@@ -62,7 +63,7 @@ const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ isOpen, onClo
                     <button type="button" onClick={onClose} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
                         {agentState.status === 'finished' ? 'Close' : 'Cancel'}
                     </button>
-                    <button type="submit" disabled={!objective.trim()} className="px-6 py-2 bg-secondary hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 w-48">
+                    <button type="submit" data-testid="godmode-autodev-start-button" disabled={!objective.trim()} className="px-6 py-2 bg-secondary hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 w-48">
                         Start AI Developer
                     </button>
                 </div>

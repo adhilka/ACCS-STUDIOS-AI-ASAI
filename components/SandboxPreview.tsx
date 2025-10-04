@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import sdk from '@stackblitz/sdk';
 import { FileNode } from '../types';
 import Spinner from './ui/Spinner';
-import { RefreshIcon } from './icons';
+import { RefreshIcon, XCircleIcon } from './icons';
 
 interface SandboxPreviewProps {
   files: FileNode[];
@@ -21,21 +21,6 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
 })
-`;
-
-const defaultIndexHtml = `
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ASAI Live Preview</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/index.tsx"></script>
-  </body>
-</html>
 `;
 
 const tailwindConfigContent = `
@@ -71,6 +56,7 @@ const SandboxPreview: React.FC<SandboxPreviewProps> = ({ files, projectType, isF
   const containerRef = useRef<HTMLDivElement>(null);
   const vmRef = useRef<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const transformFilesForSdk = (fileNodes: FileNode[]): Record<string, string> => {
     const sdkFiles: Record<string, string> = {};
@@ -89,64 +75,85 @@ const SandboxPreview: React.FC<SandboxPreviewProps> = ({ files, projectType, isF
     };
     
     setIsLoading(true);
-
-    const projectFiles = transformFilesForSdk(files);
-
-    // --- Enforce a consistent Vite + Tailwind setup ---
-
-    // Always overwrite index.html for a reliable entry point.
-    projectFiles['index.html'] = defaultIndexHtml;
-    
-    // Add required config files if they don't exist.
-    if (!projectFiles['vite.config.ts']) projectFiles['vite.config.ts'] = viteConfigContent;
-    if (!projectFiles['tailwind.config.js']) projectFiles['tailwind.config.js'] = tailwindConfigContent;
-    if (!projectFiles['postcss.config.js']) projectFiles['postcss.config.js'] = postcssConfigContent;
-    if (!projectFiles['src/index.css']) projectFiles['src/index.css'] = indexCssContent;
-    
-    // Ensure the main CSS file is imported in the JS entry point.
-    const entryFilePath = 'src/index.tsx';
-    if (projectFiles[entryFilePath] && !projectFiles[entryFilePath].includes('index.css')) {
-        projectFiles[entryFilePath] = `import './index.css';\n${projectFiles[entryFilePath]}`;
-    }
-    
-    const packageJsonFile = files.find(f => f.path === 'package.json');
-    let packageJson = { dependencies: {}, devDependencies: {} };
-    if (packageJsonFile?.content) {
-        try {
-            packageJson = JSON.parse(packageJsonFile.content);
-        } catch (e) { console.error("Invalid package.json, starting fresh.", e); }
-    }
-
-    // Merge and add required dependencies for the sandbox environment.
-    packageJson.devDependencies = {
-        ...packageJson.devDependencies,
-        "vite": "latest",
-        "@vitejs/plugin-react": "latest",
-        "typescript": "latest",
-        "tailwindcss": "latest",
-        "postcss": "latest",
-        "autoprefixer": "latest",
-    };
-    packageJson.dependencies = {
-        ...packageJson.dependencies,
-        "react": "latest",
-        "react-dom": "latest",
-    };
-
-    projectFiles['package.json'] = JSON.stringify({
-        name: 'asai-sandbox-project',
-        private: true,
-        version: '0.0.0',
-        type: 'module', // Essential for Vite
-        scripts: {
-            "dev": "vite",
-            "build": "vite build",
-            "preview": "vite preview"
-        },
-        ...packageJson
-    }, null, 2);
+    setError(null);
 
     try {
+      const projectFiles = transformFilesForSdk(files);
+
+      // --- 1. Intelligent index.html handling ---
+      if (!projectFiles['index.html']) {
+          const entryPoint = ['src/index.tsx', 'src/main.tsx', 'src/index.jsx', 'src/main.jsx'].find(p => projectFiles[p]);
+          projectFiles['index.html'] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASAI Live Preview</title>
+</head>
+<body>
+  <div id="root"></div>
+  ${entryPoint ? `<script type="module" src="/${entryPoint}"></script>` : `<div>Error: Main entry file (e.g., src/index.tsx) not found.</div>`}
+</body>
+</html>`;
+      }
+
+      // --- 2. Add required config files if they don't exist ---
+      if (!projectFiles['vite.config.ts']) projectFiles['vite.config.ts'] = viteConfigContent;
+      if (!projectFiles['tailwind.config.js']) projectFiles['tailwind.config.js'] = tailwindConfigContent;
+      if (!projectFiles['postcss.config.js']) projectFiles['postcss.config.js'] = postcssConfigContent;
+      
+      // --- 3. CSS Handling ---
+      const cssEntryPoint = 'src/index.css';
+      if (!projectFiles[cssEntryPoint]) {
+           projectFiles[cssEntryPoint] = indexCssContent;
+      }
+
+      const mainJsEntryPoint = ['src/index.tsx', 'src/main.tsx', 'src/index.jsx', 'src/main.jsx'].find(p => projectFiles[p]);
+      if (mainJsEntryPoint && !projectFiles[mainJsEntryPoint].includes('index.css')) {
+          projectFiles[mainJsEntryPoint] = `import './index.css';\n${projectFiles[mainJsEntryPoint]}`;
+      }
+
+      // --- 4. Robust package.json management ---
+      let packageJson;
+      try {
+          packageJson = projectFiles['package.json'] ? JSON.parse(projectFiles['package.json']) : {};
+      } catch (e) {
+          console.warn("Invalid package.json, creating a new one.");
+          packageJson = {};
+      }
+
+      packageJson.dependencies = packageJson.dependencies || {};
+      packageJson.devDependencies = packageJson.devDependencies || {};
+      
+      const requiredDependencies = {
+          "react": "^18.2.0",
+          "react-dom": "^18.2.0",
+      };
+      const requiredDevDependencies = {
+          "@types/react": "^18.2.0",
+          "@types/react-dom": "^18.2.0",
+          "@vitejs/plugin-react": "^4.2.0",
+          "autoprefixer": "^10.4.10",
+          "postcss": "^8.4.30",
+          "tailwindcss": "^3.4.0",
+          "typescript": "^5.2.0",
+          "vite": "^5.0.0",
+      };
+
+      packageJson.dependencies = { ...requiredDependencies, ...packageJson.dependencies };
+      packageJson.devDependencies = { ...requiredDevDependencies, ...packageJson.devDependencies };
+      
+      projectFiles['package.json'] = JSON.stringify({
+          name: 'asai-sandbox-project',
+          private: true,
+          version: '0.0.0',
+          type: 'module',
+          scripts: { "dev": "vite", "build": "vite build", "preview": "vite preview" },
+          ...packageJson
+      }, null, 2);
+
+      // --- 5. Embed the project ---
       if (vmRef.current) {
         await vmRef.current.destroy();
       }
@@ -158,26 +165,28 @@ const SandboxPreview: React.FC<SandboxPreviewProps> = ({ files, projectType, isF
           description: 'A live preview of the generated application.',
           template: 'node',
           files: projectFiles,
+          dependencies: packageJson.dependencies,
         },
         {
-          openFile: files.find(f => f.path.match(/app.tsx|index.tsx/i))?.path || 'src/index.tsx',
+          openFile: mainJsEntryPoint || 'src/index.tsx',
           view: 'preview',
           hideExplorer: true,
           showSidebar: false,
           terminalHeight: 0,
-          clickToLoad: true, // Recommended for browser compatibility
+          clickToLoad: false,
+          forceEmbedLayout: true,
         }
       );
 
     } catch (error) {
         console.error("StackBlitz SDK Error:", error);
+        setError(error instanceof Error ? error.message : "An unknown error occurred while loading the preview.");
     } finally {
         setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    // Debounce to prevent rapid reloads on file changes.
     const handler = setTimeout(() => {
         bootOrUpdateVm();
     }, 1000);
@@ -215,7 +224,19 @@ const SandboxPreview: React.FC<SandboxPreviewProps> = ({ files, projectType, isF
                 <p className="mt-4 text-neutral">Preparing Sandbox Environment...</p>
             </div>
         )}
-        <div ref={containerRef} className="w-full h-full" />
+        {error && !isLoading && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-base-100/80 z-10 p-4 text-center">
+                <XCircleIcon className="w-12 h-12 text-red-400 mb-4" />
+                <p className="font-semibold text-base-content">Preview Failed to Load</p>
+                <p className="text-sm text-neutral mt-2 mb-4">There was an error initializing the sandbox environment.</p>
+                <pre className="text-xs bg-base-200 p-2 rounded-md text-red-300 max-w-full overflow-auto">{error}</pre>
+                <button onClick={bootOrUpdateVm} className="mt-4 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white hover:bg-primary/90 transition-colors text-sm font-semibold">
+                    <RefreshIcon className="w-5 h-5" />
+                    <span>Retry</span>
+                </button>
+            </div>
+        )}
+        <div ref={containerRef} className={`w-full h-full ${error ? 'hidden' : ''}`} />
       </div>
     </div>
   );

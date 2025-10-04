@@ -42,14 +42,51 @@ If the user's prompt is too vague, ambiguous, or not actionable, you MUST genera
     if (projectType.toLowerCase().includes('react')) {
         languageDetails += `
 
-**Project Type: React Web App**
-Create a complete file structure for a React application using TypeScript and Tailwind CSS.
-1.  **Dependencies**: Create a 'package.json' file. Include 'react' and 'react-dom' in the dependencies.
-2.  **Entry Point**: 'src/index.tsx' must render 'src/App.tsx' into a DOM element with id 'root'.
-3.  **HTML**: Include an 'index.html' file with a '<div id="root"></div>'. The sandbox will inject necessary scripts and import maps.
-4.  **Styling**: Use Tailwind CSS classes for all styling.
-5.  **Code Quality**: Use modern ESM format, functional components with hooks.
-6.  **Placeholders**: Use 'https://picsum.photos/width/height' for images.`;
+**Project Type: React Web App (Vite + TypeScript + Tailwind CSS)**
+Create a complete, runnable file structure for a modern React application. The sandbox environment uses Vite.
+
+**MUST-HAVE FILES & CONFIGURATION:**
+
+1.  **\`package.json\`**:
+    *   Create a valid \`package.json\` file.
+    *   Set \`"type": "module"\`.
+    *   Include a scripts section with \`"dev": "vite"\`.
+    *   **Dependencies**: Must include \`"react": "^18.2.0"\` and \`"react-dom": "^18.2.0"\`.
+    *   **Dev Dependencies**: Must include \`"@types/react": "^18.2.0"\`, \`"@types/react-dom": "^18.2.0"\`, \`"@vitejs/plugin-react": "^4.2.0"\`, \`"autoprefixer": "^10.4.10"\`, \`"postcss": "^8.4.30"\`, \`"tailwindcss": "^3.4.0"\`, \`"typescript": "^5.2.0"\`, and \`"vite": "^5.0.0"\`.
+
+2.  **Vite Configuration**:
+    *   Create \`vite.config.ts\` that imports and uses \`@vitejs/plugin-react\`. A valid example is:
+        \`\`\`
+        import { defineConfig } from 'vite'
+        import react from '@vitejs/plugin-react'
+        
+        export default defineConfig({
+          plugins: [react()],
+        })
+        \`\`\`
+
+3.  **Tailwind CSS Configuration**:
+    *   Create \`tailwind.config.js\` with the content array pointing to \`./index.html\` and \`./src/**/*.{js,ts,jsx,tsx}\`.
+    *   Create \`postcss.config.js\` that exports the \`tailwindcss\` and \`autoprefixer\` plugins.
+
+4.  **HTML Entry Point**:
+    *   Create \`index.html\`.
+    *   It must contain \`<div id="root"></div>\` in the body.
+    *   It must load the main script with \`<script type="module" src="/src/index.tsx"></script>\`.
+
+5.  **Application Entry Point**:
+    *   Create \`src/index.tsx\`. It must render the main \`App\` component into the 'root' div.
+    *   **CRITICAL**: This file MUST import the main CSS file: \`import './index.css';\`
+
+6.  **Main CSS File**:
+    *   Create \`src/index.css\`.
+    *   It must contain the three Tailwind directives: \`@tailwind base;\`, \`@tailwind components;\`, and \`@tailwind utilities;\`.
+
+7.  **Main Component**:
+    *   Create a main component, typically \`src/App.tsx\`.
+    *   Use Tailwind CSS classes for all styling. Use functional components with hooks.
+    *   For placeholder images, use 'https://picsum.photos/width/height'.
+`;
     }
     // Other project types can be expanded here
     return languageDetails;
@@ -299,7 +336,7 @@ Here is a summary of previous work done on this project. Use this to inform your
 ${memoryFile.content}
 ---` : "";
 
-    const fullPrompt = `${baseInstruction} You are an expert, silent, programmatic software developer. Your task is to create a JSON plan to modify a project based on a user's request.
+    const fullPrompt = `${baseInstruction} You are an expert, silent, programmatic software developer. Your task is to create a JSON plan to modify a project based on a user's request and any provided context.
 
 **CRITICAL INSTRUCTIONS:**
 1.  Your response MUST be ONLY the raw JSON object. Do not include any text, explanations, or markdown formatting (like \`\`\`json\`). Your entire response must start with \`{\` and end with \`}\`.
@@ -309,6 +346,19 @@ ${memoryFile.content}
 5.  Be proactive: Remember to use 'move' for renaming files and 'copy' for duplicating files when appropriate.
 6.  If you refer to a file path in your "thoughts" or "reasoning", you MUST wrap it in backticks, e.g., \`src/index.js\`.
 7.  Your entire response must be ONLY this JSON object. Nothing else.
+
+**Handling Vague Requests with Proactive Intelligence:**
+Your goal is to be a helpful, proactive co-developer, not a passive tool. If a user's request is high-level or seems vague (e.g., "improve the theme", "make the header better", "add form validation"), do NOT immediately give up. Instead, follow these steps:
+1.  **Analyze Intent:** Identify the key concepts in the request (e.g., "theme", "header", "validation").
+2.  **Contextual Search:** Actively search the provided "Current Project Files" and "Project Memory" to find files and code related to these concepts. For "theme," look for CSS variables, style sheets, or component styling. For "header," find the header component file.
+3.  **Formulate a Proactive Plan:** Based on your findings, create a specific, actionable plan that represents a reasonable interpretation of the user's goal. For "improve the theme," this would mean identifying the CSS color variables and planning to \`update\` the file containing them with a new, aesthetically pleasing color palette.
+4.  **State Your Assumptions:** In your "thoughts" and "reasoning", clearly explain how you interpreted the request and why you've chosen your plan. For example: "The user asked to improve the theme. I've located the color variables in \`index.html\`. I will propose a new, modern color palette to enhance the visual appeal."
+5.  **Ask for Clarification as a Last Resort:** Only if a request is completely nonsensical, gibberish, or if you cannot find any relevant context in the files after searching, should you respond with a polite request for more details using this JSON structure:
+{
+  "thoughts": "The user's request is too vague, and I could not find any relevant files to modify after searching. I will ask for clarification.",
+  "reasoning": "I'm sorry, I'm not sure how to proceed with that request. Could you please provide more specific details about the changes you'd like to make?",
+  "plan": {}
+}
 
 **Plan Schema:**
 The "plan" object can contain the following keys. All are optional.
@@ -325,15 +375,8 @@ ${projectMemory}
 ${projectJsonString}
 \`\`\`
 
-**User's Request:** "${prompt}"
-
-**Handling Unclear Requests:**
-If the user's request is unclear, ambiguous, contains no actionable instructions, or is gibberish, you MUST respond with the following valid JSON structure to ask for clarification. Do not deviate.
-{
-  "thoughts": "The user's request is too vague. I cannot determine what files to change. I will ask for clarification.",
-  "reasoning": "I'm sorry, I don't understand the request. Could you please provide more details about the changes you'd like to make?",
-  "plan": {}
-}
+**User's Request & Context:**
+${prompt}
 
 **Project SVG Icon:**
 If the user asks to create, update, edit, or delete the project icon/logo, you MUST manage it as a file operation on the path \`public/icon.svg\`.
@@ -630,9 +673,10 @@ export const answerProjectQuestion = async (
     apiPoolKeys?: ApiPoolKey[]
 ): Promise<string> => {
      const projectJsonString = JSON.stringify(fileSystemToJSON(files), null, 2);
-    const fullPrompt = `${baseInstruction} You are a helpful AI assistant with expertise in software development. The user has a question about their project. Based on the files provided, answer their question. If your answer contains any file paths, you MUST wrap them in backticks, for example: "You can find the relevant code in \`src/utils/api.ts\`.".
+    const fullPrompt = `${baseInstruction} You are a helpful AI assistant with expertise in software development. The user has a question about their project. Based on the files provided and any extra context, answer their question. If your answer contains any file paths, you MUST wrap them in backticks, for example: "You can find the relevant code in \`src/utils/api.ts\`.".
 
-**User's Question:** "${prompt}"
+**User's Question & Context:**
+${prompt}
 
 **Project Files:**
 \`\`\`json
@@ -730,9 +774,9 @@ export const godModePlanner = async (
       items: {
         type: Type.OBJECT,
         properties: {
-          type: { type: Type.STRING, description: "Action type: 'CLICK_ELEMENT', 'TYPE_IN_INPUT', 'MODIFY_FILES', 'ASK_USER', 'FINISH'." },
+          type: { type: Type.STRING, description: "Action type: 'CLICK_ELEMENT', 'TYPE_IN_INPUT', 'MODIFY_FILES', 'ASK_USER', 'FINISH', 'SELECT_OPTION'." },
           selector: { type: Type.STRING, description: "The 'data-testid' selector for UI actions." },
-          payload: { type: Type.STRING, description: "Text for TYPE_IN_INPUT, question for ASK_USER, or a DETAILED PROMPT for a Coder AI for MODIFY_FILES." },
+          payload: { type: Type.STRING, description: "Text for TYPE_IN_INPUT, question for ASK_USER, a DETAILED PROMPT for a Coder AI for MODIFY_FILES, or the 'value' of the option for SELECT_OPTION." },
         },
         required: ['type']
       }
@@ -749,9 +793,10 @@ export const godModePlanner = async (
 **CRITICAL INSTRUCTIONS:**
 1.  Formulate a step-by-step plan. Your response MUST be a JSON array of action objects.
 2.  For 'MODIFY_FILES' actions, the 'payload' MUST NOT be code. It MUST be a detailed, specific prompt for a separate Coder AI that will write the code.
-3.  The final action in your plan MUST always be \`{ "type": "FINISH" }\`.
-4.  Be precise with selectors. Use the exact 'data-testid' values provided.
-5.  Do not generate a 'reasoning' field.
+3.  For 'SELECT_OPTION' actions, the 'payload' MUST be the string 'value' of the desired '<option>'.
+4.  The final action in your plan MUST always be \`{ "type": "FINISH" }\`.
+5.  Be precise with selectors. Use the exact 'data-testid' values provided.
+6.  Do not generate a 'reasoning' field.
 
 Generate the JSON plan now.`;
     
