@@ -15,82 +15,7 @@ const fileSystemToJSON = (nodes: FileNode[]): Record<string, string> => {
     return fs;
 };
 
-const baseInstruction = `You are an AI assistant for ASAI, a platform created by Muhammad Adhil for ACCS STUDIOS AI. If the user asks who made you, who created you, or who built ASAI, you must answer with "I was built by Muhammad Adhil for ACCS STUDIOS AI."`;
-
-
-const getProjectGenerationPrompt = (projectType: string) => {
-    let languageDetails = `${baseInstruction} You are a world-class, silent, programmatic software architect. Your only task is to generate a project from a user's prompt.
-
-**CRITICAL INSTRUCTIONS**: 
-1. Your response MUST be ONLY the raw JSON object, without any markdown formatting, comments, or other text. Your entire response must start with \`{\` and end with \`}\`. 
-2. The JSON object must have two keys: "projectName" and "files".
-3. "projectName": A short, catchy, and relevant string for the project's name.
-4. "files": An object where keys are the full file paths (e.g., "src/index.js") and values are the string content of those files.
-5. Your entire response must be ONLY this JSON object. Nothing else.
-
-**Handling Unclear Requests**:
-If the user's prompt is too vague, ambiguous, or not actionable, you MUST generate a valid project that asks for clarification. For example:
-{
-  "projectName": "Clarification Needed",
-  "files": {
-    "index.html": "<body><h1>Please provide more details</h1><p>The initial prompt was not clear enough to generate a project. Please try creating a new project with a more specific description of what you want to build.</p></body>",
-    "README.md": "The initial prompt was not clear enough to generate a project. Please provide more details about what you want to build."
-  }
-}
-`;
-
-    if (projectType.toLowerCase().includes('react')) {
-        languageDetails += `
-
-**Project Type: React Web App (Vite + TypeScript + Tailwind CSS)**
-Create a complete, runnable file structure for a modern React application. The sandbox environment uses Vite.
-
-**MUST-HAVE FILES & CONFIGURATION:**
-
-1.  **\`package.json\`**:
-    *   Create a valid \`package.json\` file.
-    *   Set \`"type": "module"\`.
-    *   Include a scripts section with \`"dev": "vite"\`.
-    *   **Dependencies**: Must include \`"react": "^18.2.0"\` and \`"react-dom": "^18.2.0"\`.
-    *   **Dev Dependencies**: Must include \`"@types/react": "^18.2.0"\`, \`"@types/react-dom": "^18.2.0"\`, \`"@vitejs/plugin-react": "^4.2.0"\`, \`"autoprefixer": "^10.4.10"\`, \`"postcss": "^8.4.30"\`, \`"tailwindcss": "^3.4.0"\`, \`"typescript": "^5.2.0"\`, and \`"vite": "^5.0.0"\`.
-
-2.  **Vite Configuration**:
-    *   Create \`vite.config.ts\` that imports and uses \`@vitejs/plugin-react\`. A valid example is:
-        \`\`\`
-        import { defineConfig } from 'vite'
-        import react from '@vitejs/plugin-react'
-        
-        export default defineConfig({
-          plugins: [react()],
-        })
-        \`\`\`
-
-3.  **Tailwind CSS Configuration**:
-    *   Create \`tailwind.config.js\` with the content array pointing to \`./index.html\` and \`./src/**/*.{js,ts,jsx,tsx}\`.
-    *   Create \`postcss.config.js\` that exports the \`tailwindcss\` and \`autoprefixer\` plugins.
-
-4.  **HTML Entry Point**:
-    *   Create \`index.html\`.
-    *   It must contain \`<div id="root"></div>\` in the body.
-    *   It must load the main script with \`<script type="module" src="/src/index.tsx"></script>\`.
-
-5.  **Application Entry Point**:
-    *   Create \`src/index.tsx\`. It must render the main \`App\` component into the 'root' div.
-    *   **CRITICAL**: This file MUST import the main CSS file: \`import './index.css';\`
-
-6.  **Main CSS File**:
-    *   Create \`src/index.css\`.
-    *   It must contain the three Tailwind directives: \`@tailwind base;\`, \`@tailwind components;\`, and \`@tailwind utilities;\`.
-
-7.  **Main Component**:
-    *   Create a main component, typically \`src/App.tsx\`.
-    *   Use Tailwind CSS classes for all styling. Use functional components with hooks.
-    *   For placeholder images, use 'https://picsum.photos/width/height'.
-`;
-    }
-    // Other project types can be expanded here
-    return languageDetails;
-};
+const baseInstruction = `You are an AI assistant for ASAI, a platform created by Muhammad Adhil. If the user asks who made you, who created you, or who built ASAI, you must answer with "ASAI was built by Muhammad Adhil."`;
 
 
 // FIX: Refactored `callAiModel` to handle the new token system and to automatically retry failed requests.
@@ -291,29 +216,96 @@ Return only the corrected JSON.`;
     }
 };
 
-// FIX: Updated function signature to accept and pass userId and API pool parameters.
-export const generateInitialProject = async (
-    prompt: string, 
-    projectType: string, 
-    provider: AiProvider,
-    model: string | undefined,
+const getProjectPlanPrompt = (projectType: string) => {
+    let languageDetails = `${baseInstruction} You are a world-class, silent, programmatic software architect. Your task is to generate a plan for a new project from a user's prompt.
+
+**CRITICAL INSTRUCTIONS**: 
+1. Your response MUST be ONLY the raw JSON object, without any markdown formatting. It must start with \`{\` and end with \`}\`. 
+2. The JSON object must have two keys: "projectName" (a short, catchy string) and "filesToCreate" (an array of strings, where each string is a full file path like "src/index.js").
+3. Create a logical and complete file structure for the requested application type.
+4. Your entire response must be ONLY this JSON object.
+
+**Project Type Specifics**:
+`;
+    if (projectType.toLowerCase().includes('react')) {
+        languageDetails += `For a React (Vite+TS+Tailwind) project, the file list MUST include: package.json, vite.config.ts, tailwind.config.js, postcss.config.js, index.html, src/index.tsx, src/index.css, and at least one main component file like src/App.tsx.`;
+    }
+    return languageDetails;
+};
+
+const getFileContentPrompt = (projectType: string, projectPrompt: string, allFilePaths: string[], currentFilePath: string) => {
+    let languageDetails = `${baseInstruction} You are an expert, silent, programmatic software developer. Your task is to generate the code for a single file within a larger project.
+
+**CRITICAL INSTRUCTIONS**: 
+1. Your response MUST be ONLY the raw code/text content for the requested file. 
+2. Do NOT wrap the code in markdown (like \`\`\`jsx\`), JSON, or any other formatting. 
+3. Generate complete, runnable code for the single file specified.
+4. Use modern best practices. For placeholder images, use 'https://picsum.photos/width/height'.
+`;
+
+    if (projectType.toLowerCase().includes('react')) {
+        languageDetails += `
+**Project Type: React Web App (Vite + TypeScript + Tailwind CSS)**
+- When creating \`package.json\`, include dependencies: react, react-dom. devDependencies: @vitejs/plugin-react, tailwindcss, typescript, etc.
+- When creating \`vite.config.ts\`, import and use the react plugin.
+- When creating \`src/index.tsx\`, it MUST import \`./index.css\`.
+- When creating \`src/index.css\`, it MUST include the three Tailwind directives.
+- All components must use functional components with hooks and Tailwind CSS for styling.
+`;
+    }
+
+    return `${languageDetails}
+
+**Overall Project Description:** "${projectPrompt}"
+
+**Full Project File Structure (for context):**
+${allFilePaths.join('\n')}
+
+**Your Task:**
+Generate the complete file content for: \`${currentFilePath}\`
+`;
+}
+
+export const runStreamingInitialProjectAgent = async (
+    prompt: string,
+    project: Project,
     apiConfig: ApiConfig,
+    onPlanReceived: (plan: { projectName: string, filesToCreate: string[] }) => Promise<void>,
+    onFileCreated: (file: { path: string, content: string }) => Promise<void>,
+    onAgentMessage: (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => Promise<void>,
     userId: string,
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
-): Promise<{ projectName: string; files: Record<string, string> }> => {
-    const basePrompt = getProjectGenerationPrompt(projectType);
-    const fullPrompt = `${basePrompt}\n\nThe user's request is: "${prompt}"`;
-    const text = await callAiModel(fullPrompt, provider, apiConfig, model, userId, apiPoolConfig, apiPoolKeys, null);
-    const result = await parseJsonResponse<{ projectName: string; files: Record<string, string> }>(
-        text, provider, apiConfig, model, userId, apiPoolConfig, apiPoolKeys, null
-    );
+): Promise<void> => {
     
-    if (!result.projectName || typeof result.projectName !== 'string' || !result.files || typeof result.files !== 'object') {
-        throw new Error("AI returned an invalid structure for the project. Missing 'projectName' or 'files'.");
+    // 1. Generate Plan
+    await onAgentMessage({ agentState: 'planning', text: "I'm thinking about the project structure based on your request.", thoughts: "First, I need to create a plan by defining the project name and the list of files to create." });
+    
+    const planPrompt = `${getProjectPlanPrompt(project.type)}\n\nThe user's request is: "${prompt}"`;
+    const planText = await callAiModel(planPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+    const plan = await parseJsonResponse<{ projectName: string; filesToCreate: string[] }>(planText, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+
+    if (!plan.projectName || !plan.filesToCreate || !Array.isArray(plan.filesToCreate) || plan.filesToCreate.length === 0) {
+        throw new Error("The AI failed to generate a valid project plan. Please try again with a more specific prompt.");
     }
     
-    return result;
+    await onPlanReceived(plan);
+
+    const fileListMarkdown = plan.filesToCreate.map(f => `- \`${f}\``).join('\n');
+    await onAgentMessage({ agentState: 'planning', text: `I've created a plan to build **${plan.projectName}**. I will create the following files:\n${fileListMarkdown}`, thoughts: "The plan is solid. Now I will proceed to generate the content for each file, one by one." });
+    
+    // 2. Generate Files one by one
+    for (const filePath of plan.filesToCreate) {
+        await onAgentMessage({ agentState: 'executing', currentTask: `Create ${filePath}`, text: `Creating file: \`${filePath}\``, thoughts: `Now generating the code for \`${filePath}\`. I need to make sure its content is correct and fits within the overall project structure.` });
+        
+        const contentPrompt = getFileContentPrompt(project.type, prompt, plan.filesToCreate, filePath);
+        const fileContent = await callAiModel(contentPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+        
+        await onFileCreated({ path: filePath, content: fileContent });
+    }
+
+    // 3. Finish
+    await onAgentMessage({ agentState: 'finished', text: "Initial project generation complete! You can now review the files.", thoughts: "All files have been generated and sent to the UI. My work here is done." });
 };
 
 
@@ -564,29 +556,6 @@ ${filesJsonString}
 
 // --- Autonomous Agent Functions ---
 // FIX: Updated function signature to accept and pass userId and API pool parameters.
-export const runInitialProjectAgent = async (
-    prompt: string,
-    projectType: string,
-    provider: AiProvider,
-    model: string | undefined,
-    apiConfig: ApiConfig,
-    onAgentMessage: (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => Promise<void>,
-    userId: string,
-    apiPoolConfig?: ApiPoolConfig,
-    apiPoolKeys?: ApiPoolKey[]
-): Promise<{ projectName: string, changes: AiChanges }> => {
-    await onAgentMessage({ agentState: 'planning', text: "I'm planning the project structure based on your request.", thoughts: "The first step is to generate a complete and coherent set of files for the initial project scaffold." });
-    
-    const projectData = await generateInitialProject(prompt, projectType, provider, model, apiConfig, userId, apiPoolConfig, apiPoolKeys);
-    
-    const changes: AiChanges = { create: projectData.files };
-
-    await onAgentMessage({ agentState: 'finished', text: "I've finished generating the initial project files.", thoughts: "The project structure is complete. The next step is for the system to apply these changes to the workspace." });
-    
-    return { projectName: projectData.projectName, changes };
-};
-
-// FIX: Updated function signature to accept and pass userId and API pool parameters.
 export const runAutonomousAgent = async (
     objective: string,
     initialFiles: FileNode[],
@@ -800,7 +769,7 @@ export const godModePlanner = async (
 
 Generate the JSON plan now.`;
     
-    const geminiAi = new GoogleGenAI({ apiKey: apiConfig.gemini });
+    const geminiAi = new GoogleGenAI({ apiKey: apiConfig.gemini! });
     const architectResponse = await geminiAi.models.generateContent({
       model: "gemini-2.5-flash",
       contents: architectPrompt,
@@ -814,14 +783,30 @@ Generate the JSON plan now.`;
         architectResponse.text, 'gemini', apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id
     );
 
-    // The model sometimes wraps the array in an object. This handles that case.
+    // The model can sometimes wrap the array in an object, even with a schema.
+    // This block robustly finds the array within the response.
     if (!Array.isArray(planArray)) {
-        const arrayKey = Object.keys(planArray).find(key => Array.isArray(planArray[key]));
-        if (arrayKey) {
-            planArray = planArray[arrayKey];
+        if (typeof planArray === 'object' && planArray !== null) {
+            const arrayKey = Object.keys(planArray).find(key => Array.isArray((planArray as any)[key]));
+            if (arrayKey) {
+                planArray = (planArray as any)[arrayKey];
+            } else {
+                // If no array is found as a value, but the object itself looks like a plan, try to use it.
+                // This is a defensive check against malformed but recoverable structures.
+                if (planArray.type && planArray.payload) {
+                    planArray = [planArray];
+                } else {
+                    throw new Error("God Mode planner did not return a valid plan array. The response was not iterable.");
+                }
+            }
         } else {
-            throw new Error("God Mode planner did not return a valid plan array. The response was not iterable.");
+             throw new Error("God Mode planner did not return a valid plan array. The response was not an array or a container object.");
         }
+    }
+    
+    // Additional validation to ensure all elements are objects with a 'type'
+    if (!planArray.every(item => typeof item === 'object' && item !== null && 'type' in item)) {
+        throw new Error("God Mode planner returned an array with invalid action objects.");
     }
     
     const rawPlan: Array<Omit<AiGodModeAction, 'reasoning'>> = planArray;
@@ -842,25 +827,55 @@ Generate the JSON plan now.`;
         finalAction.reasoning = reasoningText.trim().replace(/^"|"$/g, ''); // Remove quotes
         godModeMemory.push(`Reviewer's justification for '${rawAction.type}': ${finalAction.reasoning}`);
 
-        // --- 3b. THE CODER (GROQ) - Generates file content if needed ---
+        // --- 3b. THE CODER (GEMINI) - Generates file content if needed for reliability ---
         if (rawAction.type === 'MODIFY_FILES' && typeof rawAction.payload === 'string') {
-            const coderPrompt = `You are "The Coder," an expert programmer. Your response MUST be ONLY a raw JSON object with keys "create", "update", and/or "delete".
-            - The values for "create" and "update" must be objects where keys are full file paths and values are the complete new file content.
-            - The value for "delete" must be an array of file paths.
-            
+            const coderSchema = {
+                type: Type.OBJECT,
+                properties: {
+                    create: {
+                        type: Type.OBJECT,
+                        description: "Keys are file paths, values are file content.",
+                        properties: {},
+                        additionalProperties: { type: Type.STRING },
+                    },
+                    update: {
+                        type: Type.OBJECT,
+                        description: "Keys are file paths, values are new file content.",
+                        properties: {},
+                        additionalProperties: { type: Type.STRING },
+                    },
+                    delete: {
+                        type: Type.ARRAY,
+                        description: "An array of file paths to delete.",
+                        items: { type: Type.STRING }
+                    },
+                }
+            };
+
+            const coderPrompt = `You are "The Coder," an expert programmer. 
             Current project files for context:
             ${currentFilesJson}
             
-            Your task based on The Architect's request:
+            Your task based on The Architect's request is to generate the new file contents:
             ---
             ${rawAction.payload}
             ---
             Generate the JSON response now.`;
-
-            const coderResultText = await callAiModel(coderPrompt, 'groq', apiConfig, 'llama-3.1-8b-instant', userId, apiPoolConfig, apiPoolKeys, project.id);
-            const changes = await parseJsonResponse<AiChanges>(coderResultText, 'groq', apiConfig, 'llama-3.1-8b-instant', userId, apiPoolConfig, apiPoolKeys, project.id);
             
-            finalAction.payload = JSON.stringify(changes); // The executable payload
+            const coderResponse = await geminiAi.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: coderPrompt,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: coderSchema,
+                },
+            });
+
+            const changes = await parseJsonResponse<AiChanges>(
+                coderResponse.text, 'gemini', apiConfig, 'gemini-2.5-flash', userId, apiPoolConfig, apiPoolKeys, project.id
+            );
+            
+            finalAction.payload = JSON.stringify(changes);
             godModeMemory.push(`Coder implemented file changes based on Architect's prompt.`);
         }
         

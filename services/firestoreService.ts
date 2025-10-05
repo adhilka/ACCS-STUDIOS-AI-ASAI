@@ -13,13 +13,14 @@ const invitesCollection = firestore.collection('invites');
 
 // --- User Management ---
 
-export const ensureUserDocument = async (uid: string, email: string | null) => {
+export const ensureUserDocument = async (uid: string, email: string | null, displayName: string | null) => {
     const userRef = usersCollection.doc(uid);
     const doc = await userRef.get();
     if (!doc.exists) {
         await userRef.set({
             uid,
             email,
+            displayName: displayName || email?.split('@')[0] || null,
             createdAt: serverTimestamp(),
             tokenBalance: 1_000_000_000, // Grant 1 billion tokens on signup
             lastLogin: serverTimestamp(),

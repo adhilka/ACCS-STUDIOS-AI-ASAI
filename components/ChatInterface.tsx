@@ -19,6 +19,22 @@ const CodeBlock: React.FC<{ language: string, code: string }> = ({ language, cod
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const highlightSyntax = (code: string) => {
+        if (!code) return '';
+        let highlightedCode = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const keywords = ['import', 'from', 'export', 'default', 'const', 'let', 'var', 'return', 'function', 'async', 'await', 'if', 'else', 'new', 'class', 'extends', '=>', 'of', 'in', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'try', 'catch', 'finally', 'throw'];
+        const keywordRegex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'g');
+        
+        highlightedCode = highlightedCode
+            .replace(/(\/\*[\s\S]*?\*\/)|(\/\/.*)/g, '<span class="syntax-comment">$1$2</span>') // Comments
+            .replace(keywordRegex, '<span class="syntax-keyword">$1</span>') // Keywords
+            .replace(/(['"`])(.*?)\1/g, '<span class="syntax-string">$1$2$1</span>') // Strings
+            .replace(/(&lt;\/?)([a-zA-Z0-9-:]+)/g, '$1<span class="syntax-tag">$2</span>') // JSX/HTML tags
+            .replace(/\b([a-zA-Z0-9-]+)(?=\s*=)/g, '<span class="syntax-prop">$1</span>'); // props
+
+        return highlightedCode;
+    };
+
     return (
         <div className="bg-base-100 rounded-md my-2 text-base-content code-block border border-base-300">
             <div className="flex items-center justify-between px-3 py-1 bg-base-200/50 rounded-t-md text-xs text-neutral">
@@ -27,61 +43,79 @@ const CodeBlock: React.FC<{ language: string, code: string }> = ({ language, cod
                     {copied ? <><CheckIcon className="w-3 h-3 text-green-500" /> Copied!</> : <><CopyIcon className="w-3 h-3" /> Copy</>}
                 </button>
             </div>
-            <pre className="p-3 text-sm overflow-x-auto font-mono"><code>{code}</code></pre>
+            <pre className="p-3 text-sm overflow-x-auto font-mono">
+                <code dangerouslySetInnerHTML={{ __html: highlightSyntax(code) }} />
+            </pre>
+            {/* Using a style tag is a simple way to scope styles for this component without a CSS file */}
+            <style>{`
+                .code-block .syntax-keyword { color: #c586c0; }
+                .code-block .syntax-string { color: #ce9178; }
+                .code-block .syntax-comment { color: #6a9955; font-style: italic; }
+                .code-block .syntax-tag { color: #569cd6; }
+                .code-block .syntax-prop { color: #9cdcfe; }
+            `}</style>
         </div>
     );
 };
 
 const MarkdownRenderer: React.FC<{ text: string, members: ChatMessageSenderInfo[] }> = ({ text, members }) => {
-    const memberMap = new Map(members.map(m => [m.uid, m.displayName]));
-
-    const parts = text
-        .split(/(```[\s\S]*?```|@\[.*?\]\(.*?\))/g) // Split by code blocks and mentions
-        .map((part, i) => {
+    
+    const renderInlines = (line: string): React.ReactNode => {
+        const parts = line.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`|@\[.*?\]\(.*?\))/g);
+        return parts.map((part, i) => {
             if (!part) return null;
-
-            // Handle code blocks
-            if (part.startsWith('```')) {
-                const codeBlock = part.slice(3, -3);
-                const firstLineEnd = codeBlock.indexOf('\n');
-                const language = codeBlock.substring(0, firstLineEnd).trim();
-                const code = codeBlock.substring(firstLineEnd + 1).trim();
-                return <CodeBlock key={i} language={language} code={code} />;
-            }
-            
-            // Handle mentions
+            if (part.startsWith('**') && part.endsWith('**')) return <strong key={i}>{part.slice(2, -2)}</strong>;
+            if (part.startsWith('*') && part.endsWith('*')) return <em key={i}>{part.slice(1, -1)}</em>;
+            if (part.startsWith('`') && part.endsWith('`')) return <code key={i} className="bg-base-300/70 text-accent font-mono text-xs px-1.5 py-0.5 rounded-md">{part.slice(1, -1)}</code>;
             const mentionMatch = part.match(/@\[(.*?)\]\((.*?)\)/);
-            if (mentionMatch) {
-                const name = mentionMatch[1];
-                return <span key={i} className="bg-primary/20 text-primary font-semibold px-1 rounded-sm">@{name}</span>;
-            }
-
-            // Process other markdown
-            return part
-                .split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g) // Split by bold, inline code, italics
-                .map((segment, index) => {
-                    if (segment.startsWith('**') && segment.endsWith('**')) {
-                        return <strong key={index}>{segment.slice(2, -2)}</strong>;
-                    }
-                    if (segment.startsWith('*') && segment.endsWith('*')) {
-                        return <em key={index}>{segment.slice(1, -1)}</em>;
-                    }
-                    if (segment.startsWith('`') && segment.endsWith('`')) {
-                        return <code key={index} className="bg-base-300/70 text-accent font-mono text-xs px-1.5 py-0.5 rounded-md">{segment.slice(1, -1)}</code>;
-                    }
-                    if (/^\s*[*+-]\s/.test(segment)) {
-                        const listItems = segment.trim().split(/\n\s*[*+-]\s/).map((item, j) => {
-                            if (!item.trim()) return null;
-                            const text = j === 0 ? item.replace(/^\s*[*+-]\s/, '') : item;
-                            return <li key={j}>{text}</li>;
-                        }).filter(Boolean);
-                        return <ul key={index} className="list-disc list-inside space-y-1 my-2">{listItems}</ul>;
-                    }
-                    return segment;
-                });
+            if (mentionMatch) return <span key={i} className="bg-primary/20 text-primary font-semibold px-1 rounded-sm">@{mentionMatch[1]}</span>;
+            return part;
         });
+    };
 
-    return <div className="whitespace-pre-wrap leading-relaxed">{parts.filter(Boolean)}</div>;
+    const blocks = text.split(/(```[\s\S]*?```)/g);
+
+    return (
+        <div>
+            {blocks.map((block, i) => {
+                if (i % 2 === 1) { // It's a code block
+                    const codeBlock = block.slice(3, -3);
+                    const firstLineEnd = codeBlock.indexOf('\n');
+                    const language = codeBlock.substring(0, firstLineEnd).trim();
+                    const code = codeBlock.substring(firstLineEnd + 1).trim();
+                    return <CodeBlock key={i} language={language} code={code} />;
+                }
+
+                // It's a regular text block
+                const paragraphs = block.split(/\n{2,}/g); // Split by 2 or more newlines for paragraphs
+
+                return paragraphs.map((para, j) => {
+                    para = para.trim();
+                    if (!para) return null;
+
+                    const lines = para.split('\n');
+                    const isList = lines.every(line => /^\s*([*+-]|\d+\.)\s/.test(line));
+
+                    if (isList) {
+                        return (
+                            <ul key={`${i}-${j}`} className="list-disc list-inside space-y-1 my-2">
+                                {lines.map((line, k) => {
+                                    const itemText = line.trim().replace(/^([*+-]|\d+\.)\s/, '');
+                                    return <li key={k}>{renderInlines(itemText)}</li>;
+                                })}
+                            </ul>
+                        );
+                    }
+
+                    return (
+                        <p key={`${i}-${j}`} className="my-1 whitespace-pre-wrap leading-relaxed">
+                            {renderInlines(para)}
+                        </p>
+                    );
+                }).filter(Boolean);
+            })}
+        </div>
+    );
 };
 
 
@@ -410,8 +444,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                     const showHeader = !prevMsg || senderFor(prevMsg) !== senderFor(msg) || msg.sender === 'ai';
                     
                     return (
-// FIX: The ref callback should not return a value. Encapsulating the map 'set' operation in a block statement ensures it returns undefined.
-                        <div ref={el => { chatMessageRefs?.current.set(msg.id, el); }} key={msg.id} className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div ref={el => { if (chatMessageRefs) chatMessageRefs.current.set(msg.id, el); }} key={msg.id} className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                             {msg.sender === 'ai' && (
                               <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white ${msg.isAgentMessage ? 'bg-secondary' : 'bg-accent'}`}>
                                 {msg.isAgentMessage ? <RobotIcon className="w-5 h-5" /> : <AiIcon className="w-5 h-5" />}

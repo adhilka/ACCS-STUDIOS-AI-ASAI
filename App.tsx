@@ -56,7 +56,7 @@ const AppContent: React.FC = () => {
     // Fetch user's custom profile, API config, and admin status on login
     useEffect(() => {
         const loadUserData = async (fbUser: firebase.User) => {
-            await ensureUserDocument(fbUser.uid, fbUser.email);
+            await ensureUserDocument(fbUser.uid, fbUser.email, fbUser.displayName);
             const config = await getUserApiConfig(fbUser.uid);
             setApiConfig(config);
 
@@ -136,6 +136,30 @@ const AppContent: React.FC = () => {
         }
     }, [appUser, showAlert]);
 
+    const handleCreateProjectFromUpload = useCallback(async (projectName: string, files: Record<string, string>, provider: AiProvider, model?: string) => {
+        if (!appUser) {
+            showAlert("Please sign in to create a project.", 'info');
+            return;
+        }
+
+        setIsNavigating(true);
+        try {
+            const prompt = `Project '${projectName}' created from user upload on ${new Date().toLocaleDateString()}.`;
+            const projectType = 'React Web App'; // Default type for uploaded projects
+            
+            const newProjectId = await createProject(appUser.uid, projectName, prompt, projectType, provider, files, model);
+            
+            setInitialGenerationTask(null); // No generation task for uploads
+            setSelectedProjectId(newProjectId);
+
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "Failed to create project from upload.";
+            showAlert(`Error: ${errorMessage}`, 'error');
+        } finally {
+            setIsNavigating(false);
+        }
+    }, [appUser, showAlert]);
+
 
     const handleSelectProject = (projectId: string) => {
         setSelectedProjectId(projectId);
@@ -180,6 +204,7 @@ const AppContent: React.FC = () => {
                         user={appUser} 
                         onSelectProject={handleSelectProject} 
                         onStartBuilding={handleStartBuilding} 
+                        onStartBuildingFromUpload={handleCreateProjectFromUpload}
                         apiConfig={apiConfig} 
                         onApiConfigChange={handleApiConfigSave}
                         apiPoolConfig={apiPoolConfig}

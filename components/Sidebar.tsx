@@ -15,7 +15,6 @@ interface SidebarProps {
   onFileUpload: (file: File, parentPath: string) => void;
   activeTab: 'files' | 'chat' | 'snapshots' | 'todo';
   onTabChange: (tab: 'files' | 'chat' | 'snapshots' | 'todo') => void;
-  isGenerating: boolean;
   onContextMenuRequest: (path: string, x: number, y: number) => void;
   isCollaborationEnabled: boolean;
   projectId: string;
@@ -145,24 +144,16 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
       </div>
       <div className="flex-grow overflow-hidden">
         {activeTab === 'files' && (
-           props.isGenerating ? (
-                <div className="flex flex-col items-center justify-center h-full text-center text-neutral p-4">
-                    <Spinner size="md" />
-                    <p className="mt-4 font-semibold">AI is building your project...</p>
-                    <p className="text-sm">Check the Chat tab for progress.</p>
-                </div>
-            ) : (
-                <FileExplorer 
-                    files={props.files} 
-                    selectedFilePath={props.selectedFilePath} 
-                    onFileSelect={props.onFileSelect}
-                    onFileDelete={props.onFileDelete}
-                    onFileAdd={props.onFileAdd}
-                    onFileUpload={props.onFileUpload}
-                    onContextMenuRequest={props.onContextMenuRequest}
-                    projectId={projectId}
-                />
-            )
+            <FileExplorer 
+                files={props.files} 
+                selectedFilePath={props.selectedFilePath} 
+                onFileSelect={props.onFileSelect}
+                onFileDelete={props.onFileDelete}
+                onFileAdd={props.onFileAdd}
+                onFileUpload={props.onFileUpload}
+                onContextMenuRequest={props.onContextMenuRequest}
+                projectId={projectId}
+            />
         )}
         {activeTab === 'chat' && (
              <ChatInterface 

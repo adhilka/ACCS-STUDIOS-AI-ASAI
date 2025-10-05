@@ -52,6 +52,101 @@ const indexCssContent = `
 @tailwind utilities;
 `;
 
+const debuggerScriptContent = `
+<script>
+  (() => {
+    console.log('ASAI Visual Debugger Initialized.');
+    let highlightEl = null;
+    let styleSheet = null;
+
+    const actionStyles = {
+      CLICK_ELEMENT: {
+          borderColor: 'rgba(59, 130, 246, 0.9)', // blue-500
+          label: 'Clicking'
+      },
+      TYPE_IN_INPUT: {
+          borderColor: 'rgba(16, 185, 129, 0.9)', // emerald-500
+          label: 'Typing'
+      },
+    };
+
+    const injectStylesheet = (actionType) => {
+        if (styleSheet) styleSheet.remove();
+        const style = actionStyles[actionType] || actionStyles.CLICK_ELEMENT;
+        styleSheet = document.createElement("style");
+        styleSheet.type = "text/css";
+        styleSheet.innerText = \`
+            @keyframes asai-pulse {
+                0% { box-shadow: 0 0 0 0 \${style.borderColor}; }
+                70% { box-shadow: 0 0 0 10px rgba(129, 140, 248, 0); }
+                100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0); }
+            }
+        \`;
+        document.head.appendChild(styleSheet);
+    }
+
+    const clearHighlight = () => {
+        if (highlightEl) {
+            highlightEl.remove();
+            highlightEl = null;
+        }
+    };
+
+    const showHighlight = ({ selector, actionType }) => {
+        clearHighlight();
+        const targetEl = document.querySelector(\`[data-testid="\${selector}"]\`);
+        if (!targetEl) {
+            console.warn(\`ASAI Debugger: Could not find element with selector [\${selector}]\`);
+            return;
+        }
+
+        injectStylesheet(actionType);
+        const rect = targetEl.getBoundingClientRect();
+        const style = actionStyles[actionType] || actionStyles.CLICK_ELEMENT;
+
+        highlightEl = document.createElement('div');
+        highlightEl.style.position = 'fixed';
+        highlightEl.style.top = \`\${rect.top}px\`;
+        highlightEl.style.left = \`\${rect.left}px\`;
+        highlightEl.style.width = \`\${rect.width}px\`;
+        highlightEl.style.height = \`\${rect.height}px\`;
+        highlightEl.style.border = \`3px solid \${style.borderColor}\`;
+        highlightEl.style.borderRadius = '4px';
+        highlightEl.style.backgroundColor = 'rgba(129, 140, 248, 0.2)';
+        highlightEl.style.zIndex = '99999';
+        highlightEl.style.pointerEvents = 'none';
+        highlightEl.style.transition = 'all 0.2s ease-out';
+        highlightEl.style.animation = 'asai-pulse 1.5s infinite';
+        
+        const labelEl = document.createElement('div');
+        labelEl.innerText = style.label;
+        labelEl.style.position = 'absolute';
+        labelEl.style.top = '-24px';
+        labelEl.style.left = '0';
+        labelEl.style.backgroundColor = style.borderColor;
+        labelEl.style.color = 'white';
+        labelEl.style.padding = '2px 6px';
+        labelEl.style.borderRadius = '4px';
+        labelEl.style.fontSize = '12px';
+        labelEl.style.fontWeight = 'bold';
+        
+        highlightEl.appendChild(labelEl);
+        document.body.appendChild(highlightEl);
+    };
+    
+    window.addEventListener('message', (event) => {
+        if (event.data?.source === 'asai-god-mode-debugger') {
+            if (event.data.type === 'HIGHLIGHT') {
+                showHighlight(event.data.payload);
+            } else if (event.data.type === 'CLEAR') {
+                clearHighlight();
+            }
+        }
+    });
+  })();
+</script>
+`;
+
 const SandboxPreview: React.FC<SandboxPreviewProps> = ({ files, projectType, isFullScreen, onCloseFullScreen, isMobile }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const vmRef = useRef<any>(null);
@@ -96,6 +191,15 @@ const SandboxPreview: React.FC<SandboxPreviewProps> = ({ files, projectType, isF
   ${entryPoint ? `<script type="module" src="/${entryPoint}"></script>` : `<div>Error: Main entry file (e.g., src/index.tsx) not found.</div>`}
 </body>
 </html>`;
+      }
+
+      // --- Inject God Mode Debugger ---
+      if (projectFiles['index.html']) {
+        if (projectFiles['index.html'].includes('</body>')) {
+            projectFiles['index.html'] = projectFiles['index.html'].replace('</body>', `${debuggerScriptContent}</body>`);
+        } else {
+            projectFiles['index.html'] += debuggerScriptContent;
+        }
       }
 
       // --- 2. Add required config files if they don't exist ---
@@ -217,7 +321,7 @@ const SandboxPreview: React.FC<SandboxPreviewProps> = ({ files, projectType, isF
             )}
         </div>
       </div>
-      <div className="w-full h-full border-0 bg-base-100 relative">
+      <div id="sandbox-container" className="w-full h-full border-0 bg-base-100 relative">
         {isLoading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-base-100/80 z-10">
                 <Spinner size="lg" />

@@ -255,7 +255,7 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         <table className="w-full text-left text-sm">
                             <thead className="bg-base-300/50 sticky top-0">
                                 <tr>
-                                    <th className="p-3">Email</th>
+                                    <th className="p-3">User</th>
                                     <th className="p-3">Token Balance</th>
                                     <th className="p-3">Signed Up</th>
                                     <th className="p-3 text-right">Actions</th>
@@ -264,7 +264,7 @@ const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             <tbody>
                                 {users.map(user => (
                                     <tr key={user.uid} className="border-b border-base-300">
-                                        <td className="p-3 whitespace-nowrap">{user.email}</td>
+                                        <td className="p-3 whitespace-nowrap">{user.displayName || user.email}</td>
                                         <td className="p-3 font-mono whitespace-nowrap">
                                             {editingUserId === user.uid ? (
                                                 <input 

@@ -9,7 +9,7 @@ import ProjectSettingsModal from '../components/ProjectSettingsModal';
 import BuildModeModal from '../components/BuildModeModal';
 import AutonomousModeModal from '../components/AutonomousModeModal';
 import Spinner from '../components/ui/Spinner';
-import { generateModificationPlan, executeModificationPlan, analyzeCode, runAutonomousAgent, proposeFixes, runInitialProjectAgent, answerProjectQuestion, summarizeChangesForMemory, askGeneralQuestion, generateSvgAsset, godModePlanner } from '../services/aiService';
+import { generateModificationPlan, executeModificationPlan, analyzeCode, runAutonomousAgent, proposeFixes, runStreamingInitialProjectAgent, answerProjectQuestion, summarizeChangesForMemory, askGeneralQuestion, generateSvgAsset, godModePlanner } from '../services/aiService';
 import { 
     addChatMessage, addFileOrFolder, deleteFileByPath, applyAiChanges, 
     getProjectDetails, updateProjectDetails, updateChatMessage, deleteProject, 
@@ -95,7 +95,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     const [activeBottomTab, setActiveBottomTab] = useState<'console' | 'terminal'>('console');
     const [consoleMessages, setConsoleMessages] = useState<ConsoleMessage[]>([]);
     const [agentState, setAgentState] = useState<AgentState>({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] });
-    const [isGeneratingInitialProject, setIsGeneratingInitialProject] = useState(false);
     const [sidebarTab, setSidebarTab] = useState<'files' | 'chat' | 'snapshots' | 'todo'>('files');
     const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
     const [savingFile, setSavingFile] = useState<string | null>(null);
@@ -294,68 +293,58 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             if (!initialGenerationTask || files.length > 0 || !project) return;
             
             onTaskConsumed();
-
-            setIsGeneratingInitialProject(true);
+    
             setIsAiLoading(true);
             if(isMobile) {
                 setMobileView('chat');
             } else {
                 setSidebarTab('chat');
-                setIsPreviewPaneOpen(true);
             }
-
+            
             const { prompt, provider, model } = initialGenerationTask;
             
             const userMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'user', text: `Build me this: "${prompt}"` };
             await addChatMessage(projectId, userMessage, dbInstance);
-
-            const onAgentMessage = async (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => {
-                const agentMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'ai', isAgentMessage: true, ...message };
-                await addAndParseAiMessage(agentMessage);
+    
+            const onPlanReceived = async (plan: { projectName: string, filesToCreate: string[] }) => {
+                await updateProjectDetails(projectId, plan.projectName, prompt, model, 'stackblitz', provider, dbInstance);
             };
-
+    
+            const onFileCreated = async (file: { path: string, content: string }) => {
+                await addFileOrFolder(projectId, file.path, 'file', file.content, dbInstance);
+            };
+    
             try {
                 const key = apiConfig[provider];
                 if (!key && !apiPoolConfig.isEnabled) throw new Error(`API key for ${provider} is not configured.`);
                 
-                const { projectName, changes } = await runInitialProjectAgent(
+                await runStreamingInitialProjectAgent(
                     prompt,
-                    project.type,
-                    provider,
-                    model,
+                    project,
                     apiConfig,
-                    onAgentMessage,
+                    onPlanReceived,
+                    onFileCreated,
+                    addAndParseAiMessage,
                     user.uid,
                     apiPoolConfig,
                     apiPoolKeys
                 );
-
-                await updateProjectDetails(projectId, projectName, prompt, model, 'stackblitz', provider, dbInstance);
-                await applyAiChanges(projectId, [], changes, dbInstance);
-                
-                const summary = await summarizeChangesForMemory(prompt, { reasoning: 'Initial project generation' } as AiPlan, changes, project, apiConfig, user.uid, apiPoolConfig, apiPoolKeys);
-                const memoryFile = files.find(f => f.path === ".asai/memory.md");
-                const newMemoryContent = `### Initial Project Generation\n${summary}`;
-                
-                if (memoryFile) {
-                    await updateFileContent(projectId, memoryFile.id, newMemoryContent, dbInstance);
-                } else {
-                    await addFileOrFolder(projectId, ".asai/memory.md", 'file', newMemoryContent, dbInstance);
-                }
-                
-                setSidebarTab('files');
+    
             } catch (err) {
                 const message = err instanceof Error ? err.message : "An unknown error occurred during project generation.";
                 await addAndParseAiMessage({ sender: 'ai', text: `Sorry, I ran into a problem: ${message}` });
-                setSidebarTab('files');
             } finally {
                 setIsAiLoading(false);
-                setIsGeneratingInitialProject(false);
+                if(isMobile) {
+                    setMobileView('files');
+                } else {
+                    setSidebarTab('files');
+                }
             }
         };
-
+    
         runInitialBuild();
-    }, [initialGenerationTask, files, project, onTaskConsumed, projectId, apiConfig, isMobile, user.uid, apiPoolConfig, apiPoolKeys, dbInstance]);
+    }, [initialGenerationTask, files.length, project, onTaskConsumed, projectId, apiConfig, isMobile, user.uid, apiPoolConfig, apiPoolKeys, dbInstance]);
 
 
     const handleFileSelect = (path: string) => {
@@ -692,7 +681,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 const initialFile = initialFileMap.get(file.path);
                 if (!initialFile) {
                     changes.create![file.path] = file.content || '';
-// FIX: The type of `initialFile` was being inferred as `unknown`, preventing access to `.content`. Explicitly typing `initialFileMap` as `Map<string, FileNode>` ensures `initialFile` is correctly typed as `FileNode | undefined`, allowing safe access to its properties.
                 } else if (initialFile.content !== file.content) {
                     changes.update![file.path] = file.content || '';
                 }
@@ -717,9 +705,28 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
     };
 
     const executeGodModeAction = useCallback(async (action: AiGodModeAction) => {
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        const postToSandbox = (message: object) => {
+            const container = document.getElementById('sandbox-container');
+            const iframe = container?.querySelector('iframe');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage(message, '*');
+            } else {
+                console.warn('Sandbox iframe not found, cannot send debug message.');
+            }
+        };
+
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         try {
+            if (action.selector && (action.type === 'CLICK_ELEMENT' || action.type === 'TYPE_IN_INPUT')) {
+                postToSandbox({ 
+                    source: 'asai-god-mode-debugger',
+                    type: 'HIGHLIGHT',
+                    payload: { selector: action.selector, actionType: action.type }
+                });
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+
             switch (action.type) {
                 case 'CLICK_ELEMENT':
                     if (action.selector) {
@@ -733,11 +740,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                         const el = document.querySelector(`[data-testid="${action.selector}"]`) as HTMLInputElement | HTMLTextAreaElement;
                         if (el) {
                             el.focus();
-                            
-                            // This is the key to making React update state for controlled components
                             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
                             nativeInputValueSetter?.call(el, action.payload);
-
                             el.dispatchEvent(new Event('input', { bubbles: true }));
                         } else {
                             throw new Error(`Input with selector [${action.selector}] not found.`);
@@ -755,7 +759,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                                 throw new Error(`Failed to parse MODIFY_FILES payload: ${message}`);
                             }
                         } else if (typeof action.payload === 'object') {
-                            // This is a fallback in case the AI returns an object directly
                             changes = action.payload as AiChanges;
                         } else {
                             throw new Error('Invalid payload type for MODIFY_FILES. Expected a JSON string or an object.');
@@ -781,7 +784,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             setGodModeActionQueue([]);
             setCurrentGodModeAction(null);
             return;
+        } finally {
+            postToSandbox({ source: 'asai-god-mode-debugger', type: 'CLEAR' });
         }
+        
+        await new Promise(resolve => setTimeout(resolve, 200));
         setCurrentGodModeAction(null);
     }, [projectId, files, dbInstance, showAlert]);
 
@@ -1197,8 +1204,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />
                 <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} projectId={projectId} onGenerateKey={handleGenerateShareKey} isCollaborationEnabled={isCollaborationEnabled} ownerUid={project.ownerId} />
                 <DeploymentModal isOpen={isDeploymentModalOpen} onClose={() => setIsDeploymentModalOpen(false)} onDeployCodeSandbox={()=>{}} isDeploying={isDeploying} />
-                 {/* FIX: Pass the 'project' prop to SvgDesignModal as it is required. */}
-<SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading} project={project}/>
+                 <SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading} project={project}/>
                 <GodModeModal isOpen={isGodModeModalOpen} onClose={() => setIsGodModeModalOpen(false)} onStart={handleStartGodMode} isLoading={isAiLoading} apiConfig={apiConfig} />
                 {isFullScreenPreview && <SandboxPreview files={files} projectType={project.type} isFullScreen onCloseFullScreen={() => setIsFullScreenPreview(false)} />}
                 {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenuItems} onClose={() => setContextMenu(null)} />}
@@ -1234,7 +1240,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                         onFileUpload={handleFileUpload}
                         activeTab={sidebarTab}
                         onTabChange={setSidebarTab}
-                        isGenerating={isGeneratingInitialProject}
                         onContextMenuRequest={handleContextMenuRequest}
                         isCollaborationEnabled={isCollaborationEnabled}
                         projectId={projectId}
@@ -1313,8 +1318,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
             <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />
             <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} projectId={projectId} onGenerateKey={handleGenerateShareKey} isCollaborationEnabled={isCollaborationEnabled} ownerUid={project.ownerId} />
             <DeploymentModal isOpen={isDeploymentModalOpen} onClose={() => setIsDeploymentModalOpen(false)} onDeployCodeSandbox={()=>{}} isDeploying={isDeploying} />
-            {/* FIX: Pass the 'project' prop to SvgDesignModal as it is required. */}
-<SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading} project={project} />
+            <SvgDesignModal isOpen={isSvgDesignModalOpen} onClose={() => setIsSvgDesignModalOpen(false)} onGenerate={handleGenerateSvg} onSaveToFile={handleSaveSvgToFile} onApplyAsIcon={handleApplySvgAsIcon} isGenerating={isAiLoading} project={project} />
             <GodModeModal isOpen={isGodModeModalOpen} onClose={() => setIsGodModeModalOpen(false)} onStart={handleStartGodMode} isLoading={isAiLoading} apiConfig={apiConfig} />
             {isFullScreenPreview && <SandboxPreview files={files} projectType={project.type} isFullScreen onCloseFullScreen={() => setIsFullScreenPreview(false)} />}
             {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenuItems} onClose={() => setContextMenu(null)} />}

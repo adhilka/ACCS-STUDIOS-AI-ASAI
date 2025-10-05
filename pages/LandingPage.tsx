@@ -72,7 +72,7 @@ const Header: React.FC<{ onSignInClick: () => void; onShowDocs: () => void; }> =
             <div className="container mx-auto flex justify-between items-center px-4">
                 <div className="flex items-center space-x-3">
                     <CodeIcon className="w-8 h-8 text-accent"/>
-                    <span className="text-xl font-bold tracking-wider text-base-content">ACCS STUDIOS AI</span>
+                    <span className="text-xl font-bold tracking-wider text-base-content">ASAI</span>
                 </div>
                 <div className="flex items-center space-x-4">
                      <button 
@@ -187,4 +187,183 @@ const SectionTitle: React.FC<{ children: React.ReactNode, subtitle: string, dela
     </div>
 );
 
-const Landing
+// FIX: Completed the LandingPage component definition which was previously cut short.
+const LandingPage: React.FC<LandingPageProps> = ({ onStartBuilding, onSignInClick, onShowDocs }) => {
+    const [prompt, setPrompt] = useState('');
+    const promptRef = useRef<HTMLTextAreaElement>(null);
+
+    const handleStart = () => {
+        if (prompt.trim()) {
+            onStartBuilding(prompt.trim(), 'gemini', '');
+        }
+    };
+    
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('in-view');
+                    }
+                });
+            },
+            {
+                threshold: 0.1,
+            }
+        );
+
+        const elements = document.querySelectorAll('.scroll-animate');
+        elements.forEach((el) => observer.observe(el));
+
+        return () => {
+            elements.forEach((el) => observer.unobserve(el));
+        };
+    }, []);
+
+    return (
+        <div className="bg-base-100 text-base-content min-h-screen font-sans">
+            <Header onSignInClick={onSignInClick} onShowDocs={onShowDocs} />
+            <main>
+                <Section className="pt-32 sm:pt-48 text-center relative overflow-hidden">
+                    <div className="absolute inset-0 bg-grid-pattern opacity-5"></div>
+                    <div className="relative z-10">
+                        <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-base-content scroll-animate">
+                            Build Applications at the <span className="text-accent">Speed of Thought</span>
+                        </h1>
+                        <p className="mt-6 max-w-2xl mx-auto text-lg text-neutral scroll-animate" style={{ transitionDelay: '0.2s' }}>
+                            Your autonomous AI partner for planning, coding, and collaboration. Go from idea to deployment in minutes, not weeks.
+                        </p>
+                        <div className="mt-10 max-w-xl mx-auto scroll-animate" style={{ transitionDelay: '0.4s' }}>
+                            <div className="relative">
+                                <textarea
+                                    ref={promptRef}
+                                    value={prompt}
+                                    onChange={(e) => setPrompt(e.target.value)}
+                                    placeholder="e.g., A pomodoro timer with a customizable work/break cycle..."
+                                    className="w-full bg-base-200 border border-base-300 rounded-lg py-4 px-5 pr-32 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"
+                                    rows={1}
+                                />
+                                <button
+                                    onClick={handleStart}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 bg-primary hover:opacity-90 text-white font-semibold rounded-md transition-colors"
+                                >
+                                    Start Building
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <MockEditor />
+                </Section>
+                
+                <Section id="how-it-works">
+                    <SectionTitle subtitle="A simple, powerful workflow that keeps you in control.">
+                        How It Works
+                    </SectionTitle>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+                        {steps.map((step, i) => (
+                            <div key={i} className="text-center p-6 bg-base-200 rounded-xl border border-transparent hover:border-accent transition-all scroll-animate" style={{ transitionDelay: `${i * 0.1}s` }}>
+                                <div className="inline-block p-4 bg-accent/10 rounded-full text-accent mb-4">
+                                    <step.icon className="w-8 h-8"/>
+                                </div>
+                                <h3 className="text-lg font-bold text-base-content">{step.title}</h3>
+                                <p className="mt-2 text-sm text-neutral">{step.text}</p>
+                            </div>
+                        ))}
+                    </div>
+                </Section>
+
+                <Section id="use-cases" className="bg-base-200">
+                     <SectionTitle subtitle="ASAI is designed for a variety of users who want to build faster and smarter.">
+                        Who is it for?
+                    </SectionTitle>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        {Object.entries(useCases).map(([key, useCase], i) => (
+                             <div key={key} className="p-8 rounded-xl border border-base-300 scroll-animate" style={{ transitionDelay: `${i * 0.1}s` }}>
+                                <div className="flex items-center gap-4 mb-4">
+                                    <div className="p-2 bg-primary/10 rounded-lg text-primary"><useCase.icon className="w-6 h-6"/></div>
+                                    <h3 className="text-xl font-bold text-base-content">{useCase.title}</h3>
+                                </div>
+                                <p className="text-neutral">{useCase.text}</p>
+                            </div>
+                        ))}
+                    </div>
+                </Section>
+
+                <Section id="comparison">
+                    <SectionTitle subtitle="See how ASAI stacks up against other AI code generation tools.">
+                        A Class Above
+                    </SectionTitle>
+                    <div className="max-w-4xl mx-auto bg-base-200 rounded-xl border border-base-300 overflow-hidden scroll-animate" style={{ transitionDelay: '0.2s' }}>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-base-300 text-xs text-neutral uppercase tracking-wider">
+                                    <tr>
+                                        <th scope="col" className="px-6 py-3">Feature</th>
+                                        <th scope="col" className="px-6 py-3 text-center">ASAI</th>
+                                        <th scope="col" className="px-6 py-3 text-center">Other Tools</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {comparisonFeatures.map((item, index) => (
+                                        <tr key={index} className="border-b border-base-300">
+                                            <th scope="row" className="px-6 py-4 font-medium text-base-content whitespace-nowrap">{item.feature}</th>
+                                            <td className="px-6 py-4 text-center">
+                                                {typeof item.asai === 'boolean' ? 
+                                                    (item.asai ? <CheckCircleIcon className="w-5 h-5 text-green-400 mx-auto" /> : <XCircleIcon className="w-5 h-5 text-red-400 mx-auto" />) :
+                                                    <span className="px-2 py-1 bg-primary/10 text-primary/80 text-xs font-semibold rounded-full">{item.asai}</span>
+                                                }
+                                            </td>
+                                            <td className="px-6 py-4 text-center">
+                                                {typeof item.others === 'boolean' ? 
+                                                    (item.others ? <CheckCircleIcon className="w-5 h-5 text-green-400 mx-auto" /> : <XCircleIcon className="w-5 h-5 text-red-400 mx-auto" />) :
+                                                    <span className="text-neutral">{item.others}</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </Section>
+                
+                <Section className="text-center">
+                    <h2 className="text-3xl font-bold scroll-animate">Ready to Build?</h2>
+                    <p className="mt-4 max-w-xl mx-auto text-neutral scroll-animate" style={{ transitionDelay: '0.2s' }}>Join the waitlist and be the first to experience the future of software development.</p>
+                    <div className="mt-8 scroll-animate" style={{ transitionDelay: '0.4s' }}>
+                        <button onClick={onSignInClick} className="px-8 py-3 bg-primary hover:opacity-90 text-white font-semibold rounded-lg transition-colors text-lg">
+                            Get Started
+                        </button>
+                    </div>
+                </Section>
+            </main>
+            
+            <footer className="bg-base-200 border-t border-base-300">
+                <div className="container mx-auto px-4 py-8 flex justify-between items-center text-sm">
+                    <p className="text-neutral">&copy; {new Date().getFullYear()} ASAI. All rights reserved.</p>
+                    <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-neutral hover:text-base-content">
+                        <GithubIcon />
+                    </a>
+                </div>
+            </footer>
+
+            <style>{`
+                .bg-grid-pattern {
+                    background-image: linear-gradient(var(--color-base-300) 1px, transparent 1px), linear-gradient(to right, var(--color-base-300) 1px, transparent 1px);
+                    background-size: 2rem 2rem;
+                }
+                .scroll-animate {
+                    opacity: 0;
+                    transform: translateY(20px);
+                    transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+                }
+                .scroll-animate.in-view {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            `}</style>
+        </div>
+    );
+};
+
+export default LandingPage;

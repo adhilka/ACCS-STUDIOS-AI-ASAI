@@ -175,6 +175,7 @@ export type AdminSettings = {
 export type AdminUser = {
   uid: string;
   email: string | null;
+  displayName?: string | null;
   createdAt: firebase.firestore.Timestamp;
   tokenBalance: number;
 };

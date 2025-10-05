@@ -10,6 +10,7 @@ interface LoginPageProps {
 const LoginPage: React.FC<LoginPageProps> = ({ onShowDocs }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [name, setName] = useState('');
     const [isLogin, setIsLogin] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
@@ -22,7 +23,12 @@ const LoginPage: React.FC<LoginPageProps> = ({ onShowDocs }) => {
             if (isLogin) {
                 await auth.signInWithEmailAndPassword(email, password);
             } else {
-                await auth.createUserWithEmailAndPassword(email, password);
+                const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+                if (userCredential.user) {
+                    await userCredential.user.updateProfile({
+                        displayName: name
+                    });
+                }
             }
         } catch (err: any) {
             setError(err.message);
@@ -40,7 +46,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onShowDocs }) => {
                     <div className="text-base-content">
                         <div className="flex items-center gap-3">
                             <CodeIcon className="w-10 h-10 text-primary" />
-                            <h1 className="text-2xl font-bold tracking-wider">ACCS STUDIOS AI</h1>
+                            <h1 className="text-2xl font-bold tracking-wider">ASAI</h1>
                         </div>
                         <p className="mt-4 text-3xl font-bold">Build applications at the speed of thought.</p>
                         <p className="mt-4 text-neutral">Your autonomous AI partner for planning, coding, and collaboration.</p>
@@ -75,7 +81,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onShowDocs }) => {
                      <div className="mb-8 text-center md:hidden">
                          <div className="flex items-center gap-3 justify-center">
                             <CodeIcon className="w-8 h-8 text-primary" />
-                            <h1 className="text-xl font-bold tracking-wider">ACCS STUDIOS AI</h1>
+                            <h1 className="text-xl font-bold tracking-wider">ASAI</h1>
                         </div>
                     </div>
 
@@ -85,6 +91,21 @@ const LoginPage: React.FC<LoginPageProps> = ({ onShowDocs }) => {
                     {error && <p className="bg-red-500/10 text-red-400 text-sm p-3 rounded-md mb-6 border border-red-500/20">{error}</p>}
 
                     <form onSubmit={handleSubmit} className="space-y-6">
+                        {!isLogin && (
+                            <div>
+                                <label className="block text-neutral text-sm font-bold mb-2" htmlFor="name">
+                                    Your Name
+                                </label>
+                                <input
+                                    id="name"
+                                    type="text"
+                                    value={name}
+                                    onChange={e => setName(e.target.value)}
+                                    className="w-full bg-base-300 border border-base-300/50 rounded-md py-3 px-4 text-base-content focus:outline-none focus:ring-2 focus:ring-primary transition"
+                                    required
+                                />
+                            </div>
+                        )}
                         <div>
                             <label className="block text-neutral text-sm font-bold mb-2" htmlFor="email">
                                 Email Address
@@ -129,7 +150,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onShowDocs }) => {
                             Documentation
                         </button>
                     </div>
-                    <p className="text-center text-xs text-neutral/50 mt-4">Version 1.0.1 ALPHA</p>
+                    <p className="text-center text-xs text-neutral/50 mt-4">Version 1.0.2 ALPHA</p>
                 </div>
             </div>
         </div>

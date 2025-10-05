@@ -4,7 +4,7 @@ import { User, Project, ApiConfig, AiProvider, ApiPoolConfig, ApiPoolKey, AdminU
 // FIX: Import firestore functions for admin panel and usage stats.
 import { getUserProjects, saveApiPoolConfig, addApiPoolKey, deleteApiPoolKey, joinProjectByShareKey, getCollectionCount, getAllUsers, getUserFileStats, updateUserTokenBalance, getAdminSettings, saveAdminSettings, getPlatformErrors, acceptInvite } from '../services/firestoreService';
 import Spinner, { AiTypingIndicator } from '../components/ui/Spinner';
-import { CodeIcon, KeyIcon, RocketIcon, UserIcon, SettingsIcon, UsersIcon, ReactIcon, FileIcon, DatabaseIcon, InformationCircleIcon, TokenIcon } from '../components/icons';
+import { CodeIcon, KeyIcon, RocketIcon, UserIcon, SettingsIcon, UsersIcon, ReactIcon, FileIcon, DatabaseIcon, InformationCircleIcon, TokenIcon, UploadIcon } from '../components/icons';
 import ApiKeyModal from '../components/ApiKeyModal';
 import ProfileSettingsModal from '../components/ProfileSettingsModal';
 // FIX: Import the new AdminPanelModal.
@@ -13,12 +13,15 @@ import { auth } from '../services/firebase';
 import { formatTokens } from '../utils/formatters';
 import ThemeToggle from '../components/ThemeToggle';
 import { useAlert } from '../contexts/AlertContext';
+import NewProjectBuilder from '../components/NewProjectBuilder';
+import ProjectUploadBuilder from '../components/ProjectUploadBuilder';
 
 
 interface DashboardProps {
     user: User;
     onSelectProject: (projectId: string) => void;
     onStartBuilding: (prompt: string, provider?: AiProvider, model?: string) => void;
+    onStartBuildingFromUpload: (projectName: string, files: Record<string, string>, provider: AiProvider, model?: string) => void;
     apiConfig: ApiConfig;
     onApiConfigChange: (config: ApiConfig) => void;
     // FIX: Add props for admin functionality.
@@ -28,92 +31,6 @@ interface DashboardProps {
     setApiPoolKeys: (keys: ApiPoolKey[]) => void;
     onShowDocs: () => void;
     refreshUserProfile: () => void;
-}
-
-const modelOptions = {
-    openrouter: [
-        { id: 'mistralai/mistral-7b-instruct', name: 'Mistral 7B Instruct (Free)' },
-        { id: 'google/gemma-7b-it', name: 'Gemma 7B (Free)' },
-        { id: 'huggingfaceh4/zephyr-7b-beta', name: 'Zephyr 7B (Free)' },
-        { id: 'openai/gpt-3.5-turbo', name: 'OpenAI GPT-3.5 Turbo' },
-    ],
-    groq: [
-        { id: 'llama-3.1-8b-instant', name: 'LLaMA 3.1 8B (Fastest)' },
-        { id: 'llama-3.1-70b-versatile', name: 'LLaMA 3.1 70B (Powerful)' },
-        { id: 'gemma2-9b-it', name: 'Gemma 2 9B' },
-        { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B' },
-        { id: 'llama3-70b-8192', name: 'LLaMA 3 70B' },
-        { id: 'llama3-8b-8192', name: 'LLaMA 3 8B' },
-    ]
-};
-
-const NewProjectBuilder: React.FC<{ onStartBuilding: (prompt: string, provider: AiProvider, model: string) => void; isLoading: boolean }> = ({ onStartBuilding, isLoading }) => {
-    const [prompt, setPrompt] = useState('');
-    const [provider, setProvider] = useState<AiProvider>('gemini');
-    const [model, setModel] = useState('');
-
-    useEffect(() => {
-        // Set default model when provider changes
-        if (provider === 'groq') setModel(modelOptions.groq[0].id);
-        else if (provider === 'openrouter') setModel(modelOptions.openrouter[0].id);
-        else setModel('');
-    }, [provider]);
-
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (prompt.trim()) {
-            onStartBuilding(prompt.trim(), provider, model);
-        }
-    };
-    
-    return (
-        <div className="bg-gradient-to-br from-base-200 to-base-200/50 rounded-xl p-6 border border-base-300 shadow-lg shadow-primary/5">
-            <h2 className="text-2xl font-bold mb-4 text-base-content flex items-center gap-3"><RocketIcon className="w-6 h-6" /> Start a New Project</h2>
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-                 <textarea 
-                    value={prompt}
-                    onChange={e => setPrompt(e.target.value)}
-                    rows={3}
-                    placeholder="e.g., A pomodoro timer with a customizable work/break cycle..."
-                    className="w-full bg-base-300 border border-base-300/50 rounded-md py-3 px-4 text-base-content placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"
-                    disabled={isLoading}
-                />
-                <div className="flex flex-col sm:flex-row items-start gap-4">
-                    <select
-                        value={provider}
-                        data-testid="godmode-dashboard-provider-select"
-                        onChange={e => setProvider(e.target.value as AiProvider)}
-                        className="w-full sm:w-auto h-11 bg-base-200 border border-base-300 rounded-md px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-primary transition-colors hover:bg-base-300 shrink-0"
-                        disabled={isLoading}
-                    >
-                        <option value="gemini">Gemini</option>
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="groq">Groq</option>
-                    </select>
-
-                    {(provider === 'openrouter' || provider === 'groq') && (
-                        <select
-                            value={model}
-                            data-testid="godmode-dashboard-model-select"
-                            onChange={e => setModel(e.target.value)}
-                            className="w-full sm:w-auto h-11 bg-base-200 border border-base-300 rounded-md px-3 text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-primary transition-colors hover:bg-base-300 shrink-0"
-                            disabled={isLoading}
-                        >
-                            {modelOptions[provider].map(opt => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
-                        </select>
-                    )}
-
-                    <button 
-                        type="submit" 
-                        disabled={isLoading || !prompt.trim()} 
-                        className="w-full sm:w-auto px-6 py-2 h-11 bg-primary hover:bg-primary/90 text-white font-semibold rounded-md transition-all flex items-center justify-center gap-2 shrink-0 disabled:bg-primary/50 disabled:cursor-not-allowed sm:ml-auto btn-shine"
-                    >
-                        {isLoading ? <Spinner size="sm"/> : <>Start Building</>}
-                    </button>
-                </div>
-            </form>
-        </div>
-    )
 }
 
 const JoinProject: React.FC<{ onJoin: (key: string) => Promise<void> }> = ({ onJoin }) => {
@@ -157,6 +74,7 @@ const DashboardPage: React.FC<DashboardProps> = ({
     user, 
     onSelectProject, 
     onStartBuilding, 
+    onStartBuildingFromUpload,
     apiConfig, 
     onApiConfigChange,
     apiPoolConfig,
@@ -179,6 +97,7 @@ const DashboardPage: React.FC<DashboardProps> = ({
     const [platformErrors, setPlatformErrors] = useState<PlatformError[]>([]);
     const [usageStats, setUsageStats] = useState<UserUsageStats | null>(null);
     const [apiCallCount, setApiCallCount] = useState<number>(0);
+    const [creationMode, setCreationMode] = useState<'ai' | 'upload'>('ai');
     const { showAlert } = useAlert();
     
     const userMenuRef = useRef<HTMLDivElement>(null);
@@ -224,6 +143,11 @@ const DashboardPage: React.FC<DashboardProps> = ({
         setIsCreating(true);
         onStartBuilding(prompt, provider, model);
     }
+    
+    const handleUpload = async (projectName: string, files: Record<string, string>, provider: AiProvider, model?: string) => {
+        setIsCreating(true);
+        onStartBuildingFromUpload(projectName, files, provider, model);
+    };
 
     const handleJoinProject = async (key: string) => {
         try {
@@ -329,6 +253,13 @@ const DashboardPage: React.FC<DashboardProps> = ({
         return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
     }
 
+    const tabClasses = (tab: 'ai' | 'upload') => 
+        `px-4 py-2 text-sm font-semibold transition-colors border-b-2 flex items-center gap-2 ${
+        creationMode === tab 
+        ? 'border-primary text-primary' 
+        : 'border-transparent text-neutral hover:text-base-content'
+        }`;
+
     return (
         <div className="min-h-screen bg-base-100 text-base-content">
             <header className="bg-base-200/50 backdrop-blur-sm sticky top-0 z-40 border-b border-base-300">
@@ -337,7 +268,7 @@ const DashboardPage: React.FC<DashboardProps> = ({
                        <div className="bg-primary p-2 rounded-md"><CodeIcon className="w-6 h-6 text-white"/></div>
                         <div className="flex items-baseline gap-2">
                           <h1 className="text-xl font-bold text-base-content">ASAI Dashboard</h1>
-                          <span className="text-xs bg-accent/20 text-accent font-semibold px-2 py-0.5 rounded-full">v1.0.1 ALPHA</span>
+                          <span className="text-xs bg-accent/20 text-accent font-semibold px-2 py-0.5 rounded-full">v1.0.2 ALPHA</span>
                         </div>
                     </div>
                     <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -406,7 +337,17 @@ const DashboardPage: React.FC<DashboardProps> = ({
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
                     {/* Left Column */}
                     <div className="lg:col-span-3 flex flex-col gap-8">
-                        <NewProjectBuilder onStartBuilding={handleStart} isLoading={isCreating} />
+                        <div className="bg-gradient-to-br from-base-200 to-base-200/50 rounded-xl p-6 border border-base-300 shadow-lg shadow-primary/5">
+                            <div className="flex border-b border-base-300 mb-6">
+                                <button onClick={() => setCreationMode('ai')} className={tabClasses('ai')}><RocketIcon className="w-5 h-5" /> Create with AI</button>
+                                <button onClick={() => setCreationMode('upload')} className={tabClasses('upload')}><UploadIcon className="w-5 h-5" /> Upload Project</button>
+                            </div>
+                            {creationMode === 'ai' ? (
+                                <NewProjectBuilder onStartBuilding={handleStart} isLoading={isCreating} />
+                            ) : (
+                                <ProjectUploadBuilder onStartBuilding={handleUpload} isLoading={isCreating} />
+                            )}
+                        </div>
 
                         <div>
                             <h2 className="text-2xl font-bold mb-6">Your Projects</h2>
@@ -416,7 +357,7 @@ const DashboardPage: React.FC<DashboardProps> = ({
                                 <div className="text-center py-16 border-2 border-dashed border-base-300 rounded-xl bg-base-200/50 mt-6 lg:col-span-3">
                                     <CodeIcon className="w-16 h-16 text-base-300 mx-auto mb-4" />
                                     <h3 className="text-xl font-semibold text-base-content">Your workspace is ready</h3>
-                                    <p className="text-neutral mt-2">Use the builder above to create your first project with AI.</p>
+                                    <p className="text-neutral mt-2">Create your first project with AI or upload an existing one.</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
