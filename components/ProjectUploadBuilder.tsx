@@ -135,7 +135,8 @@ const ProjectUploadBuilder: React.FC<ProjectUploadBuilderProps> = ({ onStartBuil
                 
                 <div onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${isDragging ? 'border-primary bg-primary/10' : 'border-base-300 hover:border-primary/50'}`}>
                     <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple className="hidden" accept=".zip,text/*,application/json,.md" />
-                    <input type="file" ref={folderInputRef} onChange={handleFileChange} webkitdirectory="true" directory="true" className="hidden" />
+                    {/* FIX: Use `as any` to pass non-standard `webkitdirectory` and `directory` props to bypass TypeScript type checking. */}
+                    <input type="file" ref={folderInputRef} onChange={handleFileChange} {...{ webkitdirectory: "true", directory: "true" } as any} className="hidden" />
 
                     <div className="flex flex-col items-center text-neutral">
                         <UploadIcon className="w-10 h-10 mb-2" />

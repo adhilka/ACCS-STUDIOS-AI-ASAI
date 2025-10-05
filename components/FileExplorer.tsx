@@ -49,9 +49,9 @@ const getFileIcon = (fileName: string) => {
 };
 
 const buildTree = (files: FileNode[]): TreeNode[] => {
-    const tree: TreeNode[] = [];
     const nodeMap = new Map<string, TreeNode>();
 
+    // 1. Add all explicit files/folders from the DB to the map.
     files.forEach(file => {
         nodeMap.set(file.path, {
             ...file,
@@ -59,6 +59,7 @@ const buildTree = (files: FileNode[]): TreeNode[] => {
         });
     });
 
+    // 2. Add implicit parent folders for every path.
     files.forEach(file => {
         const pathParts = file.path.split('/');
         let currentPath = '';
@@ -76,25 +77,34 @@ const buildTree = (files: FileNode[]): TreeNode[] => {
         }
     });
 
+    // 3. Link nodes together into a tree structure.
+    const tree: TreeNode[] = [];
     nodeMap.forEach(node => {
         const parentPath = node.path.substring(0, node.path.lastIndexOf('/'));
         const parent = nodeMap.get(parentPath);
-        if (parent && parent.children) {
-            parent.children.push(node);
+        if (parent && parent.type === 'folder') {
+            // It's a child node. Add it to its parent.
+            parent.children!.push(node);
         } else {
+            // It's a root node.
             tree.push(node);
         }
     });
     
+    // 4. Sort children recursively.
     const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
+        nodes.sort((a, b) => {
+            if (a.type !== b.type) {
+                return a.type === 'folder' ? -1 : 1;
+            }
+            return a.name.localeCompare(b.name);
+        });
         nodes.forEach(node => {
             if (node.children) {
-                node.children = sortNodes(node.children);
+                sortNodes(node.children);
             }
         });
-        return nodes
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .sort((a, b) => (a.type === 'folder' ? -1 : 1) - (b.type === 'folder' ? -1 : 1));
+        return nodes;
     };
 
     return sortNodes(tree);
