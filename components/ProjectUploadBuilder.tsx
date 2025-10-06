@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AiProvider } from '../types';
-import { UploadIcon, FileIcon } from './icons';
+import { UploadIcon, FileIcon, FolderIcon } from './icons';
 import Spinner from './ui/Spinner';
 import { useAlert } from '../contexts/AlertContext';
 
 declare const JSZip: any;
 
 interface ProjectUploadBuilderProps {
-  onStartBuilding: (projectName: string, files: Record<string, string>, provider: AiProvider, model?: string) => void;
+  onStartBuilding: (projectName: string, files: Record<string, string | null>, provider: AiProvider, model?: string) => void;
   isLoading: boolean;
 }
 
@@ -30,7 +30,7 @@ const modelOptions = {
 
 const ProjectUploadBuilder: React.FC<ProjectUploadBuilderProps> = ({ onStartBuilding, isLoading }) => {
     const [projectName, setProjectName] = useState('');
-    const [files, setFiles] = useState<Record<string, string>>({});
+    const [files, setFiles] = useState<Record<string, string | null>>({});
     const [isProcessing, setIsProcessing] = useState(false);
     const [provider, setProvider] = useState<AiProvider>('gemini');
     const [model, setModel] = useState('');
@@ -49,7 +49,7 @@ const ProjectUploadBuilder: React.FC<ProjectUploadBuilderProps> = ({ onStartBuil
     const processFileList = useCallback(async (fileList: FileList) => {
         setIsProcessing(true);
         try {
-            const readPromises: Promise<{ path: string; content: string }[]>[] = [];
+            const readPromises: Promise<{ path: string; content: string | null }[]>[] = [];
             
             for (const file of Array.from(fileList)) {
                 readPromises.push(new Promise(async (resolve, reject) => {
@@ -57,14 +57,27 @@ const ProjectUploadBuilder: React.FC<ProjectUploadBuilderProps> = ({ onStartBuil
                         if (file.name.endsWith('.zip')) {
                             const zip = new JSZip();
                             const contents = await zip.loadAsync(file);
-                            const unzippedFiles: { path: string, content: string }[] = [];
-                            // FIX: Cast zipEntry to 'any' to resolve TypeScript errors since its type is inferred as 'unknown'.
-                            for (const [relativePath, zipEntry] of Object.entries(contents.files)) {
-                                if (!(zipEntry as any).dir) {
-                                    unzippedFiles.push({ path: relativePath, content: await (zipEntry as any).async('string') });
+                            const fileReadPromises: Promise<{ path: string; content: string | null }>[] = [];
+                            
+                            for (const relativePath in contents.files) {
+                                if (Object.prototype.hasOwnProperty.call(contents.files, relativePath)) {
+                                    const zipEntry = contents.files[relativePath];
+                                    if (!zipEntry.dir) {
+                                        const contentPromise = zipEntry.async('string').then((content: string) => ({
+                                            path: relativePath,
+                                            content: content
+                                        }));
+                                        fileReadPromises.push(contentPromise);
+                                    } else {
+                                        // It's a directory
+                                        const dirPath = relativePath.endsWith('/') ? relativePath.slice(0, -1) : relativePath;
+                                        if (dirPath) { // Avoid empty paths from root folder in zip
+                                            fileReadPromises.push(Promise.resolve({ path: dirPath, content: null }));
+                                        }
+                                    }
                                 }
                             }
-                            resolve(unzippedFiles);
+                            resolve(await Promise.all(fileReadPromises));
                         } else {
                             const path = (file as any).webkitRelativePath || file.name;
                             const content = await file.text();
@@ -80,8 +93,12 @@ const ProjectUploadBuilder: React.FC<ProjectUploadBuilderProps> = ({ onStartBuil
             const allFilesNested = await Promise.all(readPromises);
             const allFiles = allFilesNested.flat();
 
-            const newFiles: Record<string, string> = {};
-            allFiles.forEach(f => newFiles[f.path] = f.content);
+            const newFiles: Record<string, string | null> = {};
+            allFiles.forEach(f => {
+                if (f.path) {
+                    newFiles[f.path] = f.content;
+                }
+            });
             
             setFiles(prev => ({ ...prev, ...newFiles }));
 
@@ -156,7 +173,12 @@ const ProjectUploadBuilder: React.FC<ProjectUploadBuilderProps> = ({ onStartBuil
                              <div>
                                 <h4 className="font-semibold">{Object.keys(files).length} files loaded:</h4>
                                 <ul className="h-24 overflow-y-auto bg-base-100 p-2 rounded-md border border-base-300 mt-2 text-xs font-mono text-neutral">
-                                    {Object.keys(files).slice(0, 100).map(path => <li key={path} className="truncate flex items-center gap-2"><FileIcon className="w-3 h-3 shrink-0" />{path}</li>)}
+                                    {Object.entries(files).slice(0, 100).map(([path, content]) => (
+                                        <li key={path} className="truncate flex items-center gap-2">
+                                            {content === null ? <FolderIcon className="w-3 h-3 shrink-0" /> : <FileIcon className="w-3 h-3 shrink-0" />}
+                                            {path}
+                                        </li>
+                                    ))}
                                     {Object.keys(files).length > 100 && <li>...and {Object.keys(files).length - 100} more</li>}
                                 </ul>
                                 <button onClick={() => setFiles({})} type="button" className="text-xs text-red-400 hover:underline mt-1">Clear files</button>

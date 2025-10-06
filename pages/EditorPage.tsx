@@ -670,32 +670,22 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         };
         
         try {
-            const finalFiles = await runAutonomousAgent(objective, files, project, apiConfig, handleAgentStateChange, onAgentMessage, user.uid, apiPoolConfig, apiPoolKeys);
-            
-            const finalFileMap: Map<string, FileNode> = new Map(finalFiles.map(f => [f.path, f]));
-            const initialFileMap: Map<string, FileNode> = new Map(files.map(f => [f.path, f]));
-            const changes: AiChanges = { create: {}, update: {}, delete: [] };
-
-            // Detect creations and updates
-            finalFiles.forEach((file: FileNode) => {
-                const initialFile = initialFileMap.get(file.path);
-                if (!initialFile) {
-                    changes.create![file.path] = file.content || '';
-                } else if (initialFile.content !== file.content) {
-                    changes.update![file.path] = file.content || '';
-                }
-            });
-
-            // Detect deletions
-            files.forEach(file => {
-                if (!finalFileMap.has(file.path)) {
-                    changes.delete!.push(file.path);
-                }
-            });
-
-            await applyAiChanges(projectId, files, changes, dbInstance);
-             await addAndParseAiMessage({ sender: 'ai', text: "Autonomous agent has completed the objective." });
-
+            // FIX: Corrected arguments passed to runAutonomousAgent and removed redundant logic.
+            // The agent now handles its own state and file updates via streaming.
+            await runAutonomousAgent(
+                objective,
+                files,
+                project,
+                apiConfig,
+                handleAgentStateChange,
+                onAgentMessage,
+                user.uid,
+                projectId,
+                dbInstance,
+                undefined, // For resumeState
+                apiPoolConfig,
+                apiPoolKeys
+            );
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
              await addAndParseAiMessage({ sender: 'ai', text: `Agent stopped due to an error: ${errorMessage}` });

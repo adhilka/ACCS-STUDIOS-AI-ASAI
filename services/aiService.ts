@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 // FIX: Import ApiPoolConfig and ApiPoolKey to support the new admin key pool feature.
 import { FileNode, ApiConfig, AiProvider, AiPlan, AgentState, AiChatMessage, AiChanges, ApiPoolConfig, ApiPoolKey, Project, User, AiGodModeAction } from "../types";
-import { deductToken, getUserProfile, logPlatformError } from "./firestoreService";
+import { deductToken, getUserProfile, logPlatformError, applyAiChanges, saveAgentMemory } from "./firestoreService";
 
 const MEMORY_FILE_PATH = ".asai/memory.md";
 
@@ -555,7 +555,6 @@ ${filesJsonString}
 }
 
 // --- Autonomous Agent Functions ---
-// FIX: Updated function signature to accept and pass userId and API pool parameters.
 export const runAutonomousAgent = async (
     objective: string,
     initialFiles: FileNode[],
@@ -564,12 +563,27 @@ export const runAutonomousAgent = async (
     onStateChange: (state: Partial<AgentState>) => void,
     onAgentMessage: (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => Promise<void>,
     userId: string,
+    projectId: string,
+    db: any, // firebase.firestore.Firestore
+    resumeFromState?: AgentState,
     apiPoolConfig?: ApiPoolConfig,
     apiPoolKeys?: ApiPoolKey[]
-): Promise<FileNode[]> => {
+): Promise<void> => {
     let currentFiles = [...initialFiles];
+    const AGENT_MEMORY_KEY = `asai_agent_memory_${projectId}`;
+
+    const agentMemory: AgentState = resumeFromState || {
+        status: 'running',
+        objective: objective,
+        plan: [],
+        currentTaskIndex: 0,
+        logs: [],
+        thoughts: '',
+    };
     
-    const plannerPrompt = `${baseInstruction} You are a senior software architect. Based on the user's high-level objective and the current project files, create a concise, step-by-step plan of action. Each step should be a single, clear task.
+    try {
+        if (!resumeFromState) {
+            const plannerPrompt = `${baseInstruction} You are a senior software architect. Based on the user's high-level objective and the current project files, create a concise, step-by-step plan of action. Each step should be a single, clear task.
 
 **CRITICAL INSTRUCTIONS:**
 1. Your response MUST be ONLY a raw JSON array of strings. e.g., \`["Create a new component for the user profile", "Add the new component to the main App page"]\`.
@@ -582,53 +596,62 @@ export const runAutonomousAgent = async (
 ${JSON.stringify(fileSystemToJSON(currentFiles), null, 2)}
 \`\`\`
 `;
+            onStateChange({ status: 'running' });
+            await onAgentMessage({ agentState: 'planning', text: "I'm formulating a plan to achieve the objective.", thoughts: "First, I need to break down the user's objective into a sequence of actionable steps." });
+            
+            const planText = await callAiModel(plannerPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
+            const plan = await parseJsonResponse<string[]>(planText, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
 
-    onStateChange({ status: 'running' });
-    await onAgentMessage({ agentState: 'planning', text: "I'm formulating a plan to achieve the objective.", thoughts: "First, I need to break down the user's objective into a sequence of actionable steps." });
-    
-    const planText = await callAiModel(plannerPrompt, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id);
-    const plan = await parseJsonResponse<string[]>(
-        planText, project.provider, apiConfig, project.model, userId, apiPoolConfig, apiPoolKeys, project.id
-    );
-
-    onStateChange({ plan: plan, logs: ["Plan generated."] });
-    
-    for (let i = 0; i < plan.length; i++) {
-        const task = plan[i];
-        onStateChange({ currentTaskIndex: i, logs: [`Starting task: ${task}`] });
-        
-        await onAgentMessage({ agentState: 'executing', currentTask: task, text: `Now working on: **${task}**`, thoughts: `I will now generate a plan to modify the files to complete the task: "${task}".` });
-        
-        const modificationPlan = await generateModificationPlan(task, currentFiles, project, apiConfig, userId, apiPoolConfig, apiPoolKeys);
-        const changes = await executeModificationPlan(task, modificationPlan, currentFiles, project, apiConfig, userId, apiPoolConfig, apiPoolKeys);
-        
-        // Simulate applying changes to our in-memory files for the next step
-        let tempFiles = [...currentFiles];
-        
-        // Deletions
-        const deletePaths = changes.delete || [];
-        tempFiles = tempFiles.filter(f => !deletePaths.includes(f.path));
-        
-        // Updates
-        if (changes.update) {
-            tempFiles = tempFiles.map(f => changes.update![f.path] ? { ...f, content: changes.update![f.path] } : f);
+            agentMemory.plan = plan;
+            agentMemory.logs.push("Plan generated.");
+            onStateChange({ plan: plan, logs: ["Plan generated."] });
         }
         
-        // Creations
-        if (changes.create) {
-            for (const path in changes.create) {
-                tempFiles.push({ id: `temp-${path}`, name: path.split('/').pop() || '', path, type: 'file', content: changes.create[path] });
+        for (let i = agentMemory.currentTaskIndex; i < agentMemory.plan.length; i++) {
+            const task = agentMemory.plan[i];
+
+            agentMemory.currentTaskIndex = i;
+            agentMemory.logs.push(`Starting task: ${task}`);
+            onStateChange({ currentTaskIndex: i, logs: [`Starting task: ${task}`] });
+            localStorage.setItem(AGENT_MEMORY_KEY, JSON.stringify(agentMemory));
+
+            await onAgentMessage({ agentState: 'executing', currentTask: task, text: `Now working on: **${task}**`, thoughts: `I will now generate a plan to modify the files to complete the task: "${task}".` });
+            
+            const modificationPlan = await generateModificationPlan(task, currentFiles, project, apiConfig, userId, apiPoolConfig, apiPoolKeys);
+            const changes = await executeModificationPlan(task, modificationPlan, currentFiles, project, apiConfig, userId, apiPoolConfig, apiPoolKeys);
+            
+            await applyAiChanges(projectId, currentFiles, changes, db);
+            
+            // Update local file state for the next loop iteration's context
+            const deletePaths = changes.delete || [];
+            currentFiles = currentFiles.filter(f => !deletePaths.includes(f.path));
+            if (changes.update) {
+                currentFiles = currentFiles.map(f => changes.update![f.path] ? { ...f, content: changes.update![f.path] } : f);
             }
+            if (changes.create) {
+                for (const path in changes.create) {
+                    currentFiles.push({ id: `temp-${path}`, name: path.split('/').pop() || '', path, type: 'file', content: changes.create[path] });
+                }
+            }
+            
+            agentMemory.logs.push(`Completed task: ${task}`);
+            onStateChange({ logs: [`Completed task: ${task}`] });
+            localStorage.setItem(AGENT_MEMORY_KEY, JSON.stringify(agentMemory));
         }
-        
-        currentFiles = tempFiles;
-        onStateChange({ logs: [`Completed task: ${task}`] });
-    }
 
-    onStateChange({ status: 'finished' });
-    await onAgentMessage({ agentState: 'finished', text: "I have completed all tasks in the plan.", thoughts: "The objective should now be complete. I will hand off the final file state to the system." });
-    
-    return currentFiles;
+        agentMemory.status = 'finished';
+        onStateChange({ status: 'finished' });
+        await onAgentMessage({ agentState: 'finished', text: "I have completed all tasks in the plan.", thoughts: "The objective should now be complete." });
+
+    } catch (error) {
+        agentMemory.status = 'error';
+        agentMemory.lastError = error instanceof Error ? error.message : String(error);
+        onStateChange({ status: 'error', lastError: agentMemory.lastError });
+        throw error;
+    } finally {
+        await saveAgentMemory(projectId, agentMemory, db);
+        localStorage.removeItem(AGENT_MEMORY_KEY);
+    }
 }
 
 // FIX: Updated function signature to accept and pass userId and API pool parameters.

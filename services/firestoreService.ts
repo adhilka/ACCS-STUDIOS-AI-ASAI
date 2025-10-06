@@ -1,6 +1,6 @@
 import firebase, { firestore, serverTimestamp } from './firebase';
 // FIX: Import admin-related types to support the new feature.
-import { Project, FileNode, AiChanges, ApiConfig, AiChatMessage, AiProvider, ApiPoolConfig, ApiPoolKey, AdminUser, User, AdminSettings, PlatformError, CustomFirebaseConfig, ChatMessageSenderInfo, Invite, Snapshot } from '../types';
+import { Project, FileNode, AiChanges, ApiConfig, AiChatMessage, AiProvider, ApiPoolConfig, ApiPoolKey, AdminUser, User, AdminSettings, PlatformError, CustomFirebaseConfig, ChatMessageSenderInfo, Invite, Snapshot, AgentState } from '../types';
 
 const projectsCollection = firestore.collection('projects');
 const userSettingsCollection = firestore.collection('userSettings');
@@ -95,7 +95,7 @@ export const createProject = async (
   prompt: string,
   projectType: string,
   provider: AiProvider,
-  files?: Record<string, string>,
+  files?: Record<string, string> | { files?: Record<string, string>, folders?: string[] },
   model?: string,
 ): Promise<string> => {
   const projectRef = await projectsCollection.add({
@@ -111,18 +111,47 @@ export const createProject = async (
     deployment: null,
   });
 
-  if (files && Object.keys(files).length > 0) {
+  if (files) {
     const filesBatch = firestore.batch();
     const filesCollection = projectRef.collection('files');
-    Object.entries(files).forEach(([path, content]) => {
-        const fileDoc: Omit<FileNode, 'id'> = {
-            name: path.split('/').pop() || '',
-            path: path,
-            type: 'file',
-            content: content,
-        };
-        filesBatch.set(filesCollection.doc(), fileDoc);
-    });
+
+    let filesToCreate: Record<string, string> | undefined;
+    let foldersToCreate: string[] | undefined;
+
+    // Type guard for backward compatibility with copyProject
+    if (files && ('files' in files || 'folders' in files)) {
+      const structure = files as { files?: Record<string, string>, folders?: string[] };
+      filesToCreate = structure.files;
+      foldersToCreate = structure.folders;
+    } else {
+      filesToCreate = files as Record<string, string>;
+    }
+
+    if (filesToCreate) {
+      Object.entries(filesToCreate).forEach(([path, content]) => {
+          const fileDoc: Omit<FileNode, 'id'> = {
+              name: path.split('/').pop() || '',
+              path: path,
+              type: 'file',
+              content: content,
+          };
+          filesBatch.set(filesCollection.doc(), fileDoc);
+      });
+    }
+    
+    if (foldersToCreate) {
+        foldersToCreate.forEach(path => {
+            if (path) {
+                const folderDoc: Omit<FileNode, 'id'> = {
+                    name: path.split('/').pop() || '',
+                    path: path,
+                    type: 'folder',
+                };
+                filesBatch.set(filesCollection.doc(), folderDoc);
+            }
+        });
+    }
+
     await filesBatch.commit();
   }
 
@@ -589,6 +618,35 @@ export const getUserFileStats = async (userId: string): Promise<{ fileCount: num
 
     return { fileCount, totalSize };
 };
+
+// --- Autonomous Agent Memory ---
+
+export const saveAgentMemory = async (projectId: string, memory: AgentState, db: firebase.firestore.Firestore = firestore): Promise<void> => {
+    await db.collection('projects').doc(projectId).collection('agentMemory').doc('latest').set({
+        ...memory,
+        updatedAt: serverTimestamp(),
+    });
+};
+
+export const getAgentMemory = async (projectId: string, db: firebase.firestore.Firestore = firestore): Promise<AgentState | null> => {
+    const doc = await db.collection('projects').doc(projectId).collection('agentMemory').doc('latest').get();
+    if (!doc.exists) return null;
+    const data = doc.data() as any;
+    // Only return states that are resumable
+    if (data.status === 'error' || data.status === 'running' || data.status === 'paused') {
+        return data as AgentState;
+    }
+    return null;
+};
+
+export const clearAgentMemory = async (projectId: string, db: firebase.firestore.Firestore = firestore): Promise<void> => {
+    const docRef = db.collection('projects').doc(projectId).collection('agentMemory').doc('latest');
+    const doc = await docRef.get();
+    if (doc.exists) {
+        await docRef.delete();
+    }
+};
+
 
 // --- Admin Features ---
 

@@ -123,7 +123,7 @@ const AppContent: React.FC = () => {
             const projectProvider = provider || 'gemini';
             const tempName = prompt.length > 50 ? prompt.substring(0, 47) + '...' : prompt;
             
-            const newProjectId = await createProject(appUser.uid, tempName, prompt, projectType, projectProvider, {}, model);
+            const newProjectId = await createProject(appUser.uid, tempName, prompt, projectType, projectProvider, undefined, model);
             
             setInitialGenerationTask({ prompt, provider: projectProvider, model });
             setSelectedProjectId(newProjectId);
@@ -136,7 +136,7 @@ const AppContent: React.FC = () => {
         }
     }, [appUser, showAlert]);
 
-    const handleCreateProjectFromUpload = useCallback(async (projectName: string, files: Record<string, string>, provider: AiProvider, model?: string) => {
+    const handleCreateProjectFromUpload = useCallback(async (projectName: string, files: Record<string, string | null>, provider: AiProvider, model?: string) => {
         if (!appUser) {
             showAlert("Please sign in to create a project.", 'info');
             return;
@@ -147,7 +147,18 @@ const AppContent: React.FC = () => {
             const prompt = `Project '${projectName}' created from user upload on ${new Date().toLocaleDateString()}.`;
             const projectType = 'React Web App'; // Default type for uploaded projects
             
-            const newProjectId = await createProject(appUser.uid, projectName, prompt, projectType, provider, files, model);
+            const filesToCreate: Record<string, string> = {};
+            const foldersToCreate: string[] = [];
+            Object.entries(files).forEach(([path, content]) => {
+                if (content === null) {
+                    foldersToCreate.push(path);
+                } else {
+                    filesToCreate[path] = content;
+                }
+            });
+            const initialContent = { files: filesToCreate, folders: foldersToCreate };
+            
+            const newProjectId = await createProject(appUser.uid, projectName, prompt, projectType, provider, initialContent, model);
             
             setInitialGenerationTask(null); // No generation task for uploads
             setSelectedProjectId(newProjectId);

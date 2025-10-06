@@ -21,7 +21,7 @@ interface DashboardProps {
     user: User;
     onSelectProject: (projectId: string) => void;
     onStartBuilding: (prompt: string, provider?: AiProvider, model?: string) => void;
-    onStartBuildingFromUpload: (projectName: string, files: Record<string, string>, provider: AiProvider, model?: string) => void;
+    onStartBuildingFromUpload: (projectName: string, files: Record<string, string | null>, provider: AiProvider, model?: string) => void;
     apiConfig: ApiConfig;
     onApiConfigChange: (config: ApiConfig) => void;
     // FIX: Add props for admin functionality.
@@ -144,7 +144,7 @@ const DashboardPage: React.FC<DashboardProps> = ({
         onStartBuilding(prompt, provider, model);
     }
     
-    const handleUpload = async (projectName: string, files: Record<string, string>, provider: AiProvider, model?: string) => {
+    const handleUpload = async (projectName: string, files: Record<string, string | null>, provider: AiProvider, model?: string) => {
         setIsCreating(true);
         onStartBuildingFromUpload(projectName, files, provider, model);
     };

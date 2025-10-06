@@ -2,21 +2,43 @@ import React, { useState, useEffect, useRef } from 'react';
 import { RobotIcon, BrainIcon } from './icons';
 import Spinner from './ui/Spinner';
 import { AgentState } from '../types';
+import { getAgentMemory, clearAgentMemory } from '../services/firestoreService';
 
 interface AutonomousModeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onStart: (objective: string) => void;
+  onResume: (state: AgentState) => void;
+  onClearMemory: () => void;
   agentState: AgentState;
+  projectId: string;
+  dbInstance: any;
 }
 
-const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ isOpen, onClose, onStart, agentState }) => {
+const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ 
+  isOpen, onClose, onStart, onResume, onClearMemory, agentState, projectId, dbInstance 
+}) => {
   const [objective, setObjective] = useState('');
+  const [resumableState, setResumableState] = useState<AgentState | null>(null);
+  const [isCheckingForResume, setIsCheckingForResume] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (isOpen) {
+      setObjective(''); // Reset objective input
+      const check = async () => {
+        setIsCheckingForResume(true);
+        const memory = await getAgentMemory(projectId, dbInstance);
+        setResumableState(memory);
+        setIsCheckingForResume(false);
+      };
+      check();
+    }
+  }, [isOpen, projectId, dbInstance]);
+
+  useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [agentState.logs]);
+  }, [agentState.logs, resumableState?.logs]);
 
   if (!isOpen) return null;
 
@@ -25,8 +47,154 @@ const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ isOpen, onClo
     if (!objective.trim() || agentState.status === 'running') return;
     onStart(objective);
   };
+
+  const handleResume = () => {
+    if (resumableState) {
+      onResume(resumableState);
+    }
+  };
+
+  const handleDiscardAndStartNew = () => {
+    onClearMemory();
+    setResumableState(null);
+  };
   
   const isRunning = agentState.status === 'running';
+
+  const renderContent = () => {
+    if (isRunning) {
+      return (
+        <div className="flex-grow flex flex-col overflow-hidden">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-grow overflow-hidden">
+                {/* Left: Plan & Status */}
+                <div className='flex flex-col'>
+                      <h3 className="text-lg font-semibold text-base-content mb-2">Agent Status</h3>
+                      <div className="bg-base-100 p-4 rounded-lg border border-base-300 flex-grow flex flex-col">
+                          <p className="text-sm text-neutral"><strong>Objective:</strong> {agentState.objective}</p>
+                          <div className="mt-2 flex items-center gap-2">
+                              <p className="text-sm text-neutral"><strong>Status:</strong></p>
+                              <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${isRunning ? 'bg-primary/20 text-primary' : 'bg-green-500/20 text-green-400'}`}>
+                                {agentState.status}
+                              </span>
+                              {isRunning && <Spinner size="sm" />}
+                          </div>
+                          {agentState.thoughts && (
+                            <div className="mt-3 pt-3 border-t border-base-300/50">
+                                <p className="text-xs font-semibold text-neutral flex items-center gap-1"><BrainIcon className="w-4 h-4" /> AI THOUGHTS:</p>
+                                <p className="text-xs text-neutral/90 italic mt-1">"{agentState.thoughts}"</p>
+                            </div>
+                        )}
+                          {agentState.plan.length > 0 && (
+                              <div className="mt-4 flex-shrink overflow-y-auto">
+                                  <h4 className="font-semibold text-base-content mb-2">Plan:</h4>
+                                  <ul className="space-y-1.5 text-sm">
+                                      {agentState.plan.map((task, index) => (
+                                          <li key={index} className={`flex items-start gap-2 ${index < agentState.currentTaskIndex ? 'text-neutral/60 line-through' : (index === agentState.currentTaskIndex ? 'text-primary font-bold' : 'text-neutral')}`}>
+                                              <span className='mt-1 text-xs shrink-0'>{index < agentState.currentTaskIndex ? '✅' : (index === agentState.currentTaskIndex ? '▶️' : '⏳')}</span>
+                                              <span>{task}</span>
+                                          </li>
+                                      ))}
+                                  </ul>
+                              </div>
+                          )}
+                      </div>
+                </div>
+                {/* Right: Logs */}
+                <div className='flex flex-col overflow-hidden'>
+                    <h3 className="text-lg font-semibold text-base-content mb-2">Action Log</h3>
+                    <div className="bg-base-300/50 text-neutral font-mono text-xs rounded-lg p-4 flex-grow overflow-y-auto border border-base-300">
+                        {agentState.logs.map((log, index) => (
+                          <p key={index} className="whitespace-pre-wrap animate-fade-in">&gt; {log}</p>
+                        ))}
+                        <div ref={logsEndRef} />
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex justify-end space-x-4 mt-6">
+                  <button type="button" onClick={onClose} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
+                    Close
+                </button>
+                <button type="button" disabled={!isRunning} className="px-6 py-2 bg-red-600 hover:bg-red-500 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 w-48">
+                    Stop Agent
+                </button>
+            </div>
+        </div>
+      );
+    }
+    
+    if (isCheckingForResume) {
+        return <div className="flex-grow flex items-center justify-center"><Spinner size="lg" /></div>;
+    }
+
+    if (resumableState) {
+        return (
+            <div className="flex-grow flex flex-col overflow-hidden">
+                <h3 className="text-lg font-semibold text-base-content mb-2">Interrupted Session Found</h3>
+                <div className="bg-base-100 p-4 rounded-lg border border-base-300 flex-grow flex flex-col overflow-y-auto">
+                    <p className="text-sm text-neutral"><strong>Original Objective:</strong> {resumableState.objective}</p>
+                    {resumableState.lastError && (
+                        <div className="mt-3 p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-400 text-sm">
+                            <strong>Last Error:</strong> {resumableState.lastError}
+                        </div>
+                    )}
+                    {resumableState.plan.length > 0 && (
+                        <div className="mt-4 flex-shrink overflow-y-auto">
+                            <h4 className="font-semibold text-base-content mb-2">Progress:</h4>
+                            <ul className="space-y-1.5 text-sm">
+                                {resumableState.plan.map((task, index) => (
+                                    <li key={index} className={`flex items-start gap-2 ${index < resumableState.currentTaskIndex ? 'text-neutral/60 line-through' : (index === resumableState.currentTaskIndex ? 'text-primary font-bold' : 'text-neutral')}`}>
+                                        <span className='mt-1 text-xs shrink-0'>{index < resumableState.currentTaskIndex ? '✅' : '⏳'}</span>
+                                        <span>{task}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+                 <div className="flex justify-end space-x-4 mt-6">
+                    <button type="button" onClick={handleDiscardAndStartNew} className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 rounded-md text-red-400 font-semibold transition-colors">
+                        Discard & Start New
+                    </button>
+                    <button type="button" onClick={handleResume} className="px-6 py-2 bg-secondary hover:opacity-90 rounded-md text-white font-semibold transition-colors">
+                        Resume Task
+                    </button>
+                </div>
+            </div>
+        );
+    }
+    
+    return (
+        <form onSubmit={handleSubmit} className="flex flex-col flex-grow">
+            <div className="flex-grow flex flex-col mb-6">
+              <label htmlFor="objective" className="block text-sm font-medium text-neutral mb-2">
+                  Your Objective
+              </label>
+              <textarea
+                  id="objective"
+                  data-testid="godmode-autodev-objective-input"
+                  value={objective}
+                  onChange={(e) => setObjective(e.target.value)}
+                  className="flex-grow w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-secondary resize-none"
+                  placeholder="e.g., Implement a complete dark mode toggle and save the user's preference in localStorage..."
+              />
+          </div>
+          {agentState.status === 'error' && (
+              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-400 text-sm">
+                  <strong>Error:</strong> {agentState.lastError}
+              </div>
+          )}
+          <div className="flex justify-end space-x-4">
+              <button type="button" onClick={onClose} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
+                  {agentState.status === 'finished' ? 'Close' : 'Cancel'}
+              </button>
+              <button type="submit" data-testid="godmode-autodev-start-button" disabled={!objective.trim()} className="px-6 py-2 bg-secondary hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 w-48">
+                  Start AI Developer
+              </button>
+          </div>
+      </form>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
@@ -38,101 +206,14 @@ const AutonomousModeModal: React.FC<AutonomousModeModalProps> = ({ isOpen, onClo
                 <p className="text-sm text-neutral">Give the AI a high-level objective and watch it work.</p>
             </div>
         </div>
-        
-        {agentState.status === 'idle' || agentState.status === 'finished' || agentState.status === 'error' ? (
-             <form onSubmit={handleSubmit} className="flex flex-col flex-grow">
-                 <div className="flex-grow flex flex-col mb-6">
-                    <label htmlFor="objective" className="block text-sm font-medium text-neutral mb-2">
-                        Your Objective
-                    </label>
-                    <textarea
-                        id="objective"
-                        data-testid="godmode-autodev-objective-input"
-                        value={objective}
-                        onChange={(e) => setObjective(e.target.value)}
-                        className="flex-grow w-full bg-base-100 border border-base-300 rounded-md py-2 px-3 text-base-content focus:outline-none focus:ring-2 focus:ring-secondary resize-none"
-                        placeholder="e.g., Implement a complete dark mode toggle and save the user's preference in localStorage..."
-                    />
-                </div>
-                {agentState.status === 'error' && (
-                    <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-400 text-sm">
-                        <strong>Error:</strong> {agentState.lastError}
-                    </div>
-                )}
-                <div className="flex justify-end space-x-4">
-                    <button type="button" onClick={onClose} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
-                        {agentState.status === 'finished' ? 'Close' : 'Cancel'}
-                    </button>
-                    <button type="submit" data-testid="godmode-autodev-start-button" disabled={!objective.trim()} className="px-6 py-2 bg-secondary hover:opacity-90 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 w-48">
-                        Start AI Developer
-                    </button>
-                </div>
-            </form>
-        ) : (
-            <div className="flex-grow flex flex-col overflow-hidden">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-grow overflow-hidden">
-                    {/* Left: Plan & Status */}
-                    <div className='flex flex-col'>
-                         <h3 className="text-lg font-semibold text-base-content mb-2">Agent Status</h3>
-                         <div className="bg-base-100 p-4 rounded-lg border border-base-300 flex-grow flex flex-col">
-                             <p className="text-sm text-neutral"><strong>Objective:</strong> {agentState.objective}</p>
-                             <div className="mt-2 flex items-center gap-2">
-                                 <p className="text-sm text-neutral"><strong>Status:</strong></p>
-                                 <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${isRunning ? 'bg-primary/20 text-primary' : 'bg-green-500/20 text-green-400'}`}>
-                                    {agentState.status}
-                                 </span>
-                                 {isRunning && <Spinner size="sm" />}
-                             </div>
-                              {agentState.thoughts && (
-                                <div className="mt-3 pt-3 border-t border-base-300/50">
-                                    <p className="text-xs font-semibold text-neutral flex items-center gap-1"><BrainIcon className="w-4 h-4" /> AI THOUGHTS:</p>
-                                    <p className="text-xs text-neutral/90 italic mt-1">"{agentState.thoughts}"</p>
-                                </div>
-                            )}
-                             {agentState.plan.length > 0 && (
-                                 <div className="mt-4 flex-shrink overflow-y-auto">
-                                     <h4 className="font-semibold text-base-content mb-2">Plan:</h4>
-                                     <ul className="space-y-1.5 text-sm">
-                                         {agentState.plan.map((task, index) => (
-                                             <li key={index} className={`flex items-start gap-2 ${index < agentState.currentTaskIndex ? 'text-neutral/60 line-through' : (index === agentState.currentTaskIndex ? 'text-primary font-bold' : 'text-neutral')}`}>
-                                                 <span className='mt-1 text-xs shrink-0'>{index < agentState.currentTaskIndex ? '✅' : (index === agentState.currentTaskIndex ? '▶️' : '⏳')}</span>
-                                                 <span>{task}</span>
-                                             </li>
-                                         ))}
-                                     </ul>
-                                 </div>
-                             )}
-                         </div>
-                    </div>
-                    {/* Right: Logs */}
-                    <div className='flex flex-col overflow-hidden'>
-                        <h3 className="text-lg font-semibold text-base-content mb-2">Action Log</h3>
-                        <div className="bg-base-300/50 text-neutral font-mono text-xs rounded-lg p-4 flex-grow overflow-y-auto border border-base-300">
-                           {agentState.logs.map((log, index) => (
-                               <p key={index} className="whitespace-pre-wrap animate-fade-in">&gt; {log}</p>
-                           ))}
-                           <div ref={logsEndRef} />
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex justify-end space-x-4 mt-6">
-                     <button type="button" onClick={onClose} className="px-4 py-2 bg-base-300 hover:bg-opacity-80 rounded-md text-base-content font-semibold transition-colors">
-                        Close
-                    </button>
-                    <button type="button" disabled={!isRunning} className="px-6 py-2 bg-red-600 hover:bg-red-500 rounded-md text-white font-semibold transition-colors flex items-center justify-center disabled:bg-opacity-50 w-48">
-                        Stop Agent
-                    </button>
-                </div>
-                 <style>{`
-                    @keyframes fade-in {
-                        from { opacity: 0; transform: translateY(5px); }
-                        to { opacity: 1; transform: translateY(0); }
-                    }
-                    .animate-fade-in { animation: fade-in 0.3s ease-out; }
-                `}</style>
-            </div>
-        )}
+        {renderContent()}
+        <style>{`
+          @keyframes fade-in {
+              from { opacity: 0; transform: translateY(5px); }
+              to { opacity: 1; transform: translateY(0); }
+          }
+          .animate-fade-in { animation: fade-in 0.3s ease-out; }
+        `}</style>
       </div>
     </div>
   );
