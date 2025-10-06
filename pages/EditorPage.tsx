@@ -16,7 +16,9 @@ import {
     copyProject, clearChatHistory, createShareKey, renameOrMovePath, 
     getUserProfile, updateFileContent, streamProjectDetails, streamProjectFiles, 
     streamChatHistory, getUsersProfiles, deleteChatMessage, getProjectFiles, getChatHistory, removeProjectMember, createInvite,
-    streamSnapshots, createSnapshot, deleteSnapshot
+    streamSnapshots, createSnapshot, deleteSnapshot,
+    // FIX: Add clearAgentMemory to imports
+    clearAgentMemory
 } from '../services/firestoreService';
 import { firestore, getSecondaryFirebaseApp } from '../services/firebase';
 import { CodeIcon, PlayIcon, CommandLineIcon, ChevronRightIcon, ExternalLinkIcon, PaperClipIcon, PencilIcon, ArrowRightIcon, DeleteIcon, TrashIcon, DocumentDuplicateIcon } from '../components/icons';
@@ -694,6 +696,62 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
         }
     };
 
+    // FIX: Add handler for resuming auto dev
+    const handleResumeAutoDev = async (stateToResume: AgentState) => {
+        if (!project) return;
+        setIsAiLoading(true);
+        setSidebarTab('chat');
+        setAgentState(stateToResume); // Set the state to the resumable state
+
+        const onAgentMessage = async (message: Omit<AiChatMessage, 'id' | 'timestamp' | 'sender'>) => {
+            const agentMessage: Omit<AiChatMessage, 'id' | 'timestamp'> = { sender: 'ai', isAgentMessage: true, ...message };
+            await addAndParseAiMessage(agentMessage);
+        };
+
+        const handleAgentStateChange = (stateUpdate: Partial<AgentState>) => {
+            setAgentState(prevState => {
+                const newState = { ...prevState, ...stateUpdate };
+                if (stateUpdate.logs) {
+                    newState.logs = [...prevState.logs, ...stateUpdate.logs];
+                }
+                return newState;
+            });
+        };
+
+        try {
+            await runAutonomousAgent(
+                stateToResume.objective,
+                files,
+                project,
+                apiConfig,
+                handleAgentStateChange,
+                onAgentMessage,
+                user.uid,
+                projectId,
+                dbInstance,
+                stateToResume, // Pass the resume state here
+                apiPoolConfig,
+                apiPoolKeys
+            );
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+            await addAndParseAiMessage({ sender: 'ai', text: `Agent stopped due to an error: ${errorMessage}` });
+        } finally {
+            setIsAiLoading(false);
+        }
+    };
+
+    // FIX: Add handler for clearing agent memory
+    const handleClearAgentMemory = async () => {
+        try {
+            await clearAgentMemory(projectId, dbInstance);
+            showAlert("Agent memory cleared.", 'success');
+        } catch (error) {
+            console.error("Failed to clear agent memory:", error);
+            showAlert("Could not clear agent memory.", 'error');
+        }
+    };
+
     const executeGodModeAction = useCallback(async (action: AiGodModeAction) => {
         const postToSandbox = (message: object) => {
             const container = document.getElementById('sandbox-container');
@@ -1189,7 +1247,17 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                     onUpdateSuccess={refreshUserProfile}
                 />
                 <BuildModeModal isOpen={isBuildModalOpen} onClose={() => setIsBuildModalOpen(false)} onBuild={(prompt) => handleSendMessage(prompt, 'build')} isLoading={isAiLoading} />
-                <AutonomousModeModal isOpen={isAutoDevModalOpen} onClose={() => {setAgentState({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] }); setIsAutoDevModalOpen(false)}} onStart={handleStartAutoDev} agentState={agentState} />
+                {/* FIX: Add missing props to AutonomousModeModal */}
+                <AutonomousModeModal 
+                    isOpen={isAutoDevModalOpen} 
+                    onClose={() => {setAgentState({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] }); setIsAutoDevModalOpen(false)}} 
+                    onStart={handleStartAutoDev} 
+                    agentState={agentState}
+                    onResume={handleResumeAutoDev}
+                    onClearMemory={handleClearAgentMemory}
+                    projectId={projectId}
+                    dbInstance={dbInstance}
+                />
                 <DebugRefactorModal isOpen={isDebugRefactorModalOpen} onClose={() => {setProposedFixes(null); setIsDebugRefactorModalOpen(false)}} onProposeFixes={handleProposeFixes} onApplyFixes={handleApplyFixes} isLoading={isFixing} proposedChanges={proposedFixes} selectedFile={selectedFile} />
                 <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />
                 <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} projectId={projectId} onGenerateKey={handleGenerateShareKey} isCollaborationEnabled={isCollaborationEnabled} ownerUid={project.ownerId} />
@@ -1303,7 +1371,17 @@ const EditorPage: React.FC<EditorPageProps> = ({ projectId, onBackToDashboard, u
                 onUpdateSuccess={refreshUserProfile}
             />
             <BuildModeModal isOpen={isBuildModalOpen} onClose={() => setIsBuildModalOpen(false)} onBuild={(prompt) => handleSendMessage(prompt, 'build')} isLoading={isAiLoading} />
-            <AutonomousModeModal isOpen={isAutoDevModalOpen} onClose={() => {setAgentState({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] }); setIsAutoDevModalOpen(false)}} onStart={handleStartAutoDev} agentState={agentState} />
+            {/* FIX: Add missing props to AutonomousModeModal */}
+            <AutonomousModeModal 
+                isOpen={isAutoDevModalOpen} 
+                onClose={() => {setAgentState({ status: 'idle', objective: '', plan: [], currentTaskIndex: -1, logs: [] }); setIsAutoDevModalOpen(false)}} 
+                onStart={handleStartAutoDev} 
+                agentState={agentState}
+                onResume={handleResumeAutoDev}
+                onClearMemory={handleClearAgentMemory}
+                projectId={projectId}
+                dbInstance={dbInstance}
+            />
             <DebugRefactorModal isOpen={isDebugRefactorModalOpen} onClose={() => {setProposedFixes(null); setIsDebugRefactorModalOpen(false)}} onProposeFixes={handleProposeFixes} onApplyFixes={handleApplyFixes} isLoading={isFixing} proposedChanges={proposedFixes} selectedFile={selectedFile} />
             <ProfileSettingsModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} user={user} onUpdateSuccess={refreshUserProfile} />
             <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} projectId={projectId} onGenerateKey={handleGenerateShareKey} isCollaborationEnabled={isCollaborationEnabled} ownerUid={project.ownerId} />
